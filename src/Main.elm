@@ -317,12 +317,12 @@ step deltaX deltaY system =
             Ecs.having2 withPosition withEnemy system
     in
     system
-        |> stepPlayerMove deltaX deltaY
+        |> movePlayer deltaX deltaY
         |> Maybe.map
-            (stepHitEnemies
-                >> stepEnemiesPosition enemyIds
-                >> stepEnemiesTeam enemyIds
-                >> stepSpawners
+            (fightEnemies
+                >> moveEnemies enemyIds
+                >> switchEnemiesTeam enemyIds
+                >> spawnEnemies
             )
         |> Maybe.withDefault system
 
@@ -331,8 +331,8 @@ step deltaX deltaY system =
 -- STEP PLAYER MOVE
 
 
-stepPlayerMove : Int -> Int -> System Store -> Maybe (System Store)
-stepPlayerMove deltaX deltaY system =
+movePlayer : Int -> Int -> System Store -> Maybe (System Store)
+movePlayer deltaX deltaY system =
     let
         enemies =
             Ecs.having2 withPosition withEnemy system
@@ -383,17 +383,17 @@ normalizePosition position =
 -- STEP HIT ENEMIES
 
 
-stepHitEnemies : System Store -> System Store
-stepHitEnemies system =
+fightEnemies : System Store -> System Store
+fightEnemies system =
     let
         enemyIds =
             Ecs.having withEnemy system
     in
-    List.foldl stepHitEnemy system enemyIds
+    List.foldl fightEnemy system enemyIds
 
 
-stepHitEnemy : Id -> System Store -> System Store
-stepHitEnemy id system =
+fightEnemy : Id -> System Store -> System Store
+fightEnemy id system =
     Maybe.map2
         (\playerPosition ( enemyPosition, Enemy { side } ) ->
             case side of
@@ -429,13 +429,13 @@ stepHitEnemy id system =
 -- STEP ENEMIES POSITION
 
 
-stepEnemiesPosition : List Id -> System Store -> System Store
-stepEnemiesPosition ids system =
-    List.foldl stepEnemyPosition system ids
+moveEnemies : List Id -> System Store -> System Store
+moveEnemies ids system =
+    List.foldl moveEnemy system ids
 
 
-stepEnemyPosition : Id -> System Store -> System Store
-stepEnemyPosition id system =
+moveEnemy : Id -> System Store -> System Store
+moveEnemy id system =
     let
         otherEnemyIds =
             Ecs.having2 withPosition withEnemy system
@@ -464,7 +464,7 @@ stepEnemyPosition id system =
                         Ecs.getComponent withPosition playerId system
                     )
     in
-    Maybe.map3 (stepEnemy otherEnemies)
+    Maybe.map3 (moveEnemyHelp otherEnemies)
         playerPosition
         enemyPosition
         enemy
@@ -475,13 +475,13 @@ stepEnemyPosition id system =
         |> Maybe.withDefault system
 
 
-stepEnemy :
+moveEnemyHelp :
     List ( Position, Enemy )
     -> Position
     -> Position
     -> Enemy
     -> Position
-stepEnemy otherEnemies playerPosition enemyPosition enemy =
+moveEnemyHelp otherEnemies playerPosition enemyPosition enemy =
     let
         deltaX =
             playerPosition.x - enemyPosition.x
@@ -529,13 +529,13 @@ controlledByEnemy x y ( enemyPosition, Enemy enemy ) =
 -- STEP ENEMIES TEAM
 
 
-stepEnemiesTeam : List Id -> System Store -> System Store
-stepEnemiesTeam ids system =
-    List.foldl stepEnemyTeam system ids
+switchEnemiesTeam : List Id -> System Store -> System Store
+switchEnemiesTeam ids system =
+    List.foldl switchEnemyTeam system ids
 
 
-stepEnemyTeam : Id -> System Store -> System Store
-stepEnemyTeam id system =
+switchEnemyTeam : Id -> System Store -> System Store
+switchEnemyTeam id system =
     Ecs.getComponent withEnemy id system
         |> Maybe.map
             (\(Enemy enemyData) ->
@@ -571,17 +571,17 @@ stepEnemyTeam id system =
 -- STEP SPAWNING
 
 
-stepSpawners : System Store -> System Store
-stepSpawners system =
+spawnEnemies : System Store -> System Store
+spawnEnemies system =
     let
         spawners =
             Ecs.having withSpawner system
     in
-    List.foldl stepSpawner system spawners
+    List.foldl spawnEnemy system spawners
 
 
-stepSpawner : Id -> System Store -> System Store
-stepSpawner id system =
+spawnEnemy : Id -> System Store -> System Store
+spawnEnemy id system =
     Maybe.map2
         (\spawner spawnerPosition ->
             if spawner.left > 0 then
