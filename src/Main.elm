@@ -2,6 +2,8 @@ module Main exposing (main)
 
 import Browser exposing (Document)
 import Browser.Events as Events
+import Dict exposing (Dict)
+import Ecs.System as Ecs exposing (Focus, Id, System)
 import Element exposing (Element)
 import Element.Background as Background
 import Element.Border as Border
@@ -30,28 +32,50 @@ height =
 
 
 
----- MODEL
+---- STORE
 
 
-type alias Model =
-    { player : Player
-    , enemies : List Enemy
-    , leftUntilSpawn : Int
-    , corner : Int
+type alias Store =
+    { nextId : Int
+    , position : Dict Id Position
+    , player : Dict Id Player
+    , enemy : Dict Id Enemy
     }
 
 
-type alias Player =
+type alias Position =
     { x : Int
     , y : Int
     }
 
 
-type alias Enemy =
+withPosition : Focus Store Position
+withPosition =
+    Ecs.focus
+        { get = .position
+        , set = \value store -> { store | position = value }
+        }
+
+
+type Player
+    = Player
+
+
+withPlayer : Focus Store Player
+withPlayer =
+    Ecs.focus
+        { get = .player
+        , set = \value store -> { store | player = value }
+        }
+
+
+type Enemy
+    = Enemy EnemyData
+
+
+type alias EnemyData =
     { left : Int
     , side : Side
-    , x : Int
-    , y : Int
     }
 
 
@@ -60,26 +84,47 @@ type Side
     | Green
 
 
+withEnemy : Focus Store Enemy
+withEnemy =
+    Ecs.focus
+        { get = .enemy
+        , set = \value store -> { store | enemy = value }
+        }
+
+
+
+---- MODEL
+
+
+type alias Model =
+    { leftUntilSpawn : Int
+    , corner : Int
+    , system : Ecs.System Store
+    }
+
+
 init : {} -> ( Model, Cmd Msg )
 init _ =
-    ( { player =
-            { x = 10
-            , y = 6
-            }
-      , enemies =
-            [ { left = 3
-              , side = Red
-              , x = 0
-              , y = 0
-              }
-            , { left = 1
-              , side = Red
-              , x = 2
-              , y = 5
-              }
-            ]
-      , leftUntilSpawn = 8
+    ( { leftUntilSpawn = 8
       , corner = 3
+      , system =
+            { nextId = 3
+            , position =
+                Dict.fromList
+                    [ ( 0, { x = 10, y = 6 } )
+                    , ( 1, { x = 0, y = 0 } )
+                    , ( 2, { x = 2, y = 5 } )
+                    ]
+            , player =
+                Dict.fromList
+                    [ ( 0, Player )
+                    ]
+            , enemy =
+                Dict.fromList
+                    [ ( 1, Enemy { left = 3, side = Red } )
+                    , ( 2, Enemy { left = 1, side = Red } )
+                    ]
+            }
       }
     , Cmd.none
     )
@@ -97,33 +142,45 @@ view model =
             [ Element.width Element.fill
             , Element.height Element.fill
             ]
-            (viewGrid model.player model.enemies)
+            (viewGrid model.system)
         ]
     }
 
 
-viewGrid player enemies =
+viewGrid : System Store -> Element Msg
+viewGrid system =
     Element.column
         [ Element.width Element.fill
         , Element.height Element.fill
         ]
         (List.range 0 (height - 1)
-            |> List.map (viewRow player enemies)
+            |> List.map (viewRow system)
         )
 
 
-viewRow player enemies rowIndex =
+viewRow : System Store -> Int -> Element Msg
+viewRow system rowIndex =
     Element.row
         [ Element.width Element.fill
         , Element.height Element.fill
         ]
         (List.range 0 (width - 1)
-            |> List.map (viewField player enemies rowIndex)
+            |> List.map (viewField system rowIndex)
         )
 
 
-viewField player enemies rowIndex columnIndex =
+viewField : System Store -> Int -> Int -> Element Msg
+viewField system rowIndex columnIndex =
     let
+        enemies =
+            Ecs.having2 withPosition withEnemy system
+                |> List.filterMap
+                    (\id ->
+                        Maybe.map2 Tuple.pair
+                            (Ecs.getComponent withPosition id system)
+                            (Ecs.getComponent withEnemy id system)
+                    )
+
         backgroundColor =
             case housesEnemy of
                 Nothing ->
@@ -147,14 +204,27 @@ viewField player enemies rowIndex columnIndex =
                     Element.rgb 0 1 0
 
         housesPlayer =
-            (rowIndex == player.y)
-                && (columnIndex == player.x)
+            Ecs.having withPlayer system
+                |> List.head
+                |> Maybe.andThen
+                    (\id ->
+                        Ecs.getComponent withPosition id system
+                    )
+                |> Maybe.map
+                    (\playerPosition ->
+                        (rowIndex == playerPosition.y)
+                            && (columnIndex == playerPosition.x)
+                    )
+                |> Maybe.withDefault False
 
         housesEnemy =
             enemies
                 |> List.filterMap
-                    (\enemy ->
-                        if (enemy.x == columnIndex) && (enemy.y == rowIndex) then
+                    (\( enemyPosition, Enemy enemy ) ->
+                        if
+                            (enemyPosition.x == columnIndex)
+                                && (enemyPosition.y == rowIndex)
+                        then
                             Just enemy.side
                         else
                             Nothing
@@ -164,9 +234,9 @@ viewField player enemies rowIndex columnIndex =
         nextToEnemy =
             enemies
                 |> List.filterMap
-                    (\enemy ->
-                        if controlledByEnemy columnIndex rowIndex enemy then
-                            Just enemy.side
+                    (\( enemyPosition, (Enemy { side }) as enemy ) ->
+                        if controlledByEnemy columnIndex rowIndex ( enemyPosition, enemy ) then
+                            Just side
                         else
                             Nothing
                     )
@@ -194,215 +264,238 @@ type Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
-update msg ({ player } as model) =
+update msg model =
+    --    let
+    --        handleArrowPressed deltaX deltaY =
+    --            case movePlayer model.enemies deltaX deltaY model.player of
+    --                Nothing ->
+    --                    ( model
+    --                    , Cmd.none
+    --                    )
+    --
+    --                Just newPlayer ->
+    --                    ( { model
+    --                        | player =
+    --                            newPlayer
+    --                        , enemies =
+    --                            model.enemies
+    --                                -- |> hitEnemies newPlayer
+    --                                |> stepEnemiesPosition newPlayer
+    --
+    --                        -- |> List.map stepEnemyTeam
+    --                      }
+    --                      -- TODO: |> stepSpawning
+    --                    , Cmd.none
+    --                    )
+    --    in
+    --    case msg of
+    --        ArrowUpPressed ->
+    --            handleArrowPressed 0 -1
+    --
+    --        ArrowDownPressed ->
+    --            handleArrowPressed 0 1
+    --
+    --        ArrowLeftPressed ->
+    --            handleArrowPressed -1 0
+    --
+    --        ArrowRightPressed ->
+    --            handleArrowPressed 1 0
+    ( model, Cmd.none )
+
+
+step : System Store -> System Store
+step system =
     let
-        handleArrowPressed deltaX deltaY =
-            case movePlayer model.enemies deltaX deltaY model.player of
-                Nothing ->
-                    ( model
-                    , Cmd.none
+        enemyIds =
+            Ecs.having2 withPosition withEnemy system
+    in
+    system
+        |> stepEnemiesPosition enemyIds
+
+
+stepEnemiesPosition : List Id -> System Store -> System Store
+stepEnemiesPosition ids system =
+    List.foldl stepEnemyPosition system ids
+
+
+stepEnemyPosition : Id -> System Store -> System Store
+stepEnemyPosition id system =
+    let
+        otherEnemyIds =
+            Ecs.having2 withPosition withEnemy system
+                |> List.filter ((/=) id)
+
+        otherEnemies =
+            otherEnemyIds
+                |> List.filterMap
+                    (\otherEnemyId ->
+                        Maybe.map2 Tuple.pair
+                            (Ecs.getComponent withPosition otherEnemyId system)
+                            (Ecs.getComponent withEnemy otherEnemyId system)
                     )
 
-                Just newPlayer ->
-                    ( { model
-                        | player =
-                            newPlayer
-                        , enemies =
-                            model.enemies
-                                |> hitEnemies newPlayer
-                                |> stepEnemiesPosition newPlayer
-                                |> List.map stepEnemyTeam
-                      }
-                        |> stepSpawning
-                    , Cmd.none
+        enemyPosition =
+            Ecs.getComponent withPosition id system
+
+        enemy =
+            Ecs.getComponent withEnemy id system
+
+        playerPosition =
+            Ecs.having withPlayer system
+                |> List.head
+                |> Maybe.andThen
+                    (\playerId ->
+                        Ecs.getComponent withPosition playerId system
                     )
     in
-    case msg of
-        ArrowUpPressed ->
-            handleArrowPressed 0 -1
-
-        ArrowDownPressed ->
-            handleArrowPressed 0 1
-
-        ArrowLeftPressed ->
-            handleArrowPressed -1 0
-
-        ArrowRightPressed ->
-            handleArrowPressed 1 0
+    Maybe.map3 (stepEnemy otherEnemies)
+        playerPosition
+        enemyPosition
+        enemy
+        |> Maybe.map
+            (\newPosition ->
+                Ecs.setComponent withPosition id newPosition system
+            )
+        |> Maybe.withDefault system
 
 
-stepSpawning : Model -> Model
-stepSpawning model =
-    if model.leftUntilSpawn > 0 then
-        { model | leftUntilSpawn = model.leftUntilSpawn - 1 }
-    else
-        let
-            ( x, y ) =
-                case model.corner of
-                    0 ->
-                        ( 0, 0 )
-
-                    1 ->
-                        ( width - 1, 0 )
-
-                    2 ->
-                        ( width - 1, height - 1 )
-
-                    3 ->
-                        ( 0, height - 1 )
-
-                    _ ->
-                        ( 0, 0 )
-
-            newEnemy =
-                { left = 3
-                , side = Red
-                , x = x
-                , y = y
-                }
-        in
-        { model
-            | enemies = newEnemy :: model.enemies
-            , leftUntilSpawn = 8
-            , corner = modBy 4 (model.corner - 1)
-        }
-
-
-movePlayer : List Enemy -> Int -> Int -> Player -> Maybe Player
-movePlayer enemies deltaX deltaY player =
-    let
-        newX =
-            player.x + deltaX
-
-        newY =
-            player.y + deltaY
-    in
-    if List.any (controlledByEnemy newX newY) enemies then
-        Nothing
-    else
-        Just { player | x = newX, y = newY }
-
-
-stepEnemyTeam : Enemy -> Enemy
-stepEnemyTeam enemy =
-    if enemy.left > 0 then
-        { enemy | left = enemy.left - 1 }
-    else
-        { enemy
-            | left =
-                case enemy.side of
-                    Green ->
-                        8
-
-                    Red ->
-                        2
-            , side =
-                case enemy.side of
-                    Green ->
-                        Red
-
-                    Red ->
-                        Green
-        }
-
-
-hitEnemies : Player -> List Enemy -> List Enemy
-hitEnemies player enemies =
-    let
-        hitEnemy enemy =
-            case enemy.side of
-                Red ->
-                    Just enemy
-
-                Green ->
-                    if (player.x == enemy.x) && (player.y == enemy.y) then
-                        Nothing
-                    else
-                        Just enemy
-    in
-    List.filterMap hitEnemy enemies
-
-
-stepEnemiesPosition : Player -> List Enemy -> List Enemy
-stepEnemiesPosition player enemies =
-    stepEnemiesPositionHelp player [] enemies
-
-
-stepEnemiesPositionHelp : Player -> List Enemy -> List Enemy -> List Enemy
-stepEnemiesPositionHelp player steppedEnemies enemies =
-    case enemies of
-        [] ->
-            List.reverse steppedEnemies
-
-        enemy :: rest ->
-            let
-                newEnemy =
-                    stepEnemy player (steppedEnemies ++ rest) enemy
-            in
-            stepEnemiesPositionHelp player (newEnemy :: steppedEnemies) rest
-
-
-stepEnemy : Player -> List Enemy -> Enemy -> Enemy
-stepEnemy player otherEnemies enemy =
+stepEnemy :
+    List ( Position, Enemy )
+    -> Position
+    -> Position
+    -> Enemy
+    -> Position
+stepEnemy otherEnemies playerPosition enemyPosition enemy =
     let
         deltaX =
-            player.x - enemy.x
+            playerPosition.x - enemyPosition.x
 
         deltaY =
-            player.y - enemy.y
+            playerPosition.y - enemyPosition.y
 
-        newEnemy =
+        newEnemyPosition =
             if abs deltaX >= abs deltaY then
                 if deltaX > 0 then
-                    { enemy | x = enemy.x + 1 }
+                    { enemyPosition | x = enemyPosition.x + 1 }
                 else if deltaX < 0 then
-                    { enemy | x = enemy.x - 1 }
+                    { enemyPosition | x = enemyPosition.x - 1 }
                 else
-                    enemy
+                    enemyPosition
             else if deltaY > 0 then
-                { enemy | y = enemy.y + 1 }
+                { enemyPosition | y = enemyPosition.y + 1 }
             else if deltaY < 0 then
-                { enemy | y = enemy.y - 1 }
+                { enemyPosition | y = enemyPosition.y - 1 }
             else
-                enemy
+                enemyPosition
     in
-    if List.any (controlledByEnemy newEnemy.x newEnemy.y) otherEnemies then
-        enemy
-    else if (newEnemy.x == player.x) && (newEnemy.y == player.y) then
-        enemy
+    if List.any (controlledByEnemy newEnemyPosition.x newEnemyPosition.y) otherEnemies then
+        enemyPosition
+    else if (newEnemyPosition.x == playerPosition.x) && (newEnemyPosition.y == playerPosition.y) then
+        enemyPosition
     else
-        newEnemy
+        newEnemyPosition
 
 
-availableForPlayer : Int -> Int -> List Enemy -> Player -> Bool
-availableForPlayer x y enemies player =
-    not (List.any (controlledByEnemy x y) enemies)
-        && (player.x >= x - 1)
-        && (player.x <= x + 1)
-        && (player.y >= y - 1)
-        && (player.y <= y + 1)
-
-
-controlledByEnemy : Int -> Int -> Enemy -> Bool
-controlledByEnemy x y enemy =
+controlledByEnemy : Int -> Int -> ( Position, Enemy ) -> Bool
+controlledByEnemy x y ( enemyPosition, Enemy enemy ) =
     case enemy.side of
         Red ->
-            (enemy.x >= x - 1)
-                && (enemy.x <= x + 1)
-                && (enemy.y >= y - 1)
-                && (enemy.y <= y + 1)
+            (enemyPosition.x >= x - 1)
+                && (enemyPosition.x <= x + 1)
+                && (enemyPosition.y >= y - 1)
+                && (enemyPosition.y <= y + 1)
 
         Green ->
             False
 
 
-isOn : Int -> Int -> Enemy -> Bool
-isOn x y enemy =
-    (x == enemy.x)
-        && (y == enemy.y)
 
-
-
+--stepSpawning : Model -> Model
+--stepSpawning model =
+--    if model.leftUntilSpawn > 0 then
+--        { model | leftUntilSpawn = model.leftUntilSpawn - 1 }
+--    else
+--        let
+--            ( x, y ) =
+--                case model.corner of
+--                    0 ->
+--                        ( 0, 0 )
+--
+--                    1 ->
+--                        ( width - 1, 0 )
+--
+--                    2 ->
+--                        ( width - 1, height - 1 )
+--
+--                    3 ->
+--                        ( 0, height - 1 )
+--
+--                    _ ->
+--                        ( 0, 0 )
+--
+--            newEnemy =
+--                { left = 3
+--                , side = Red
+--                , x = x
+--                , y = y
+--                }
+--        in
+--        { model
+--            | enemies = newEnemy :: model.enemies
+--            , leftUntilSpawn = 8
+--            , corner = modBy 4 (model.corner - 1)
+--        }
+--movePlayer : List Enemy -> Int -> Int -> Player -> Maybe Player
+--movePlayer enemies deltaX deltaY player =
+--    let
+--        newX =
+--            player.x + deltaX
+--
+--        newY =
+--            player.y + deltaY
+--    in
+--    if List.any (controlledByEnemy newX newY) enemies then
+--        Nothing
+--    else
+--        Just { player | x = newX, y = newY }
+--stepEnemyTeam : Enemy -> Enemy
+--stepEnemyTeam enemy =
+--    if enemy.left > 0 then
+--        { enemy | left = enemy.left - 1 }
+--    else
+--        { enemy
+--            | left =
+--                case enemy.side of
+--                    Green ->
+--                        8
+--
+--                    Red ->
+--                        2
+--            , side =
+--                case enemy.side of
+--                    Green ->
+--                        Red
+--
+--                    Red ->
+--                        Green
+--        }
+--
+--
+--hitEnemies : Player -> List Enemy -> List Enemy
+--hitEnemies player enemies =
+--    let
+--        hitEnemy enemy =
+--            case enemy.side of
+--                Red ->
+--                    Just enemy
+--
+--                Green ->
+--                    if (player.x == enemy.x) && (player.y == enemy.y) then
+--                        Nothing
+--                    else
+--                        Just enemy
+--    in
+--    List.filterMap hitEnemy enemies
 ---- SUBSCRIPTIONS
 
 
