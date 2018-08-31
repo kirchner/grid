@@ -265,52 +265,105 @@ type Msg
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    --    let
-    --        handleArrowPressed deltaX deltaY =
-    --            case movePlayer model.enemies deltaX deltaY model.player of
-    --                Nothing ->
-    --                    ( model
-    --                    , Cmd.none
-    --                    )
-    --
-    --                Just newPlayer ->
-    --                    ( { model
-    --                        | player =
-    --                            newPlayer
-    --                        , enemies =
-    --                            model.enemies
-    --                                -- |> hitEnemies newPlayer
-    --                                |> stepEnemiesPosition newPlayer
-    --
-    --                        -- |> List.map stepEnemyTeam
-    --                      }
-    --                      -- TODO: |> stepSpawning
-    --                    , Cmd.none
-    --                    )
-    --    in
-    --    case msg of
-    --        ArrowUpPressed ->
-    --            handleArrowPressed 0 -1
-    --
-    --        ArrowDownPressed ->
-    --            handleArrowPressed 0 1
-    --
-    --        ArrowLeftPressed ->
-    --            handleArrowPressed -1 0
-    --
-    --        ArrowRightPressed ->
-    --            handleArrowPressed 1 0
-    ( model, Cmd.none )
+    let
+        handleArrowPressed deltaX deltaY =
+            ( { model | system = step deltaX deltaY model.system }
+            , Cmd.none
+            )
+
+        --case movePlayer model.enemies deltaX deltaY model.player of
+        --    Nothing ->
+        --        ( model
+        --        , Cmd.none
+        --        )
+        --    Just newPlayer ->
+        --        ( { model
+        --            | player =
+        --                newPlayer
+        --            , enemies =
+        --                model.enemies
+        --                    -- |> hitEnemies newPlayer
+        --                    |> stepEnemiesPosition newPlayer
+        --            -- |> List.map stepEnemyTeam
+        --          }
+        --          -- TODO: |> stepSpawning
+        --        , Cmd.none
+        --        )
+    in
+    case msg of
+        ArrowUpPressed ->
+            handleArrowPressed 0 -1
+
+        ArrowDownPressed ->
+            handleArrowPressed 0 1
+
+        ArrowLeftPressed ->
+            handleArrowPressed -1 0
+
+        ArrowRightPressed ->
+            handleArrowPressed 1 0
 
 
-step : System Store -> System Store
-step system =
+
+--- STEP
+
+
+step : Int -> Int -> System Store -> System Store
+step deltaX deltaY system =
     let
         enemyIds =
             Ecs.having2 withPosition withEnemy system
     in
     system
+        |> stepPlayerMove deltaX deltaY
         |> stepEnemiesPosition enemyIds
+        |> stepEnemiesTeam enemyIds
+
+
+
+-- STEP PLAYER MOVE
+
+
+stepPlayerMove : Int -> Int -> System Store -> System Store
+stepPlayerMove deltaX deltaY system =
+    let
+        enemies =
+            Ecs.having2 withPosition withEnemy system
+                |> List.filterMap
+                    (\otherEnemyId ->
+                        Maybe.map2 Tuple.pair
+                            (Ecs.getComponent withPosition otherEnemyId system)
+                            (Ecs.getComponent withEnemy otherEnemyId system)
+                    )
+    in
+    Ecs.having withPlayer system
+        |> List.head
+        |> Maybe.andThen
+            (\playerId ->
+                Ecs.getComponent withPosition playerId system
+                    |> Maybe.map
+                        (\playerPosition ->
+                            let
+                                newX =
+                                    playerPosition.x + deltaX
+
+                                newY =
+                                    playerPosition.y + deltaY
+
+                                newPlayerPosition =
+                                    if List.any (controlledByEnemy newX newY) enemies then
+                                        playerPosition
+                                    else
+                                        { playerPosition | x = newX, y = newY }
+                            in
+                            Ecs.setComponent withPosition playerId newPlayerPosition system
+                        )
+            )
+        |> Maybe.withDefault system
+
+
+
+-- STEP ENEMIES POSITION
 
 
 stepEnemiesPosition : List Id -> System Store -> System Store
@@ -410,6 +463,48 @@ controlledByEnemy x y ( enemyPosition, Enemy enemy ) =
 
 
 
+-- STEP ENEMIES TEAM
+
+
+stepEnemiesTeam : List Id -> System Store -> System Store
+stepEnemiesTeam ids system =
+    List.foldl stepEnemyTeam system ids
+
+
+stepEnemyTeam : Id -> System Store -> System Store
+stepEnemyTeam id system =
+    Ecs.getComponent withEnemy id system
+        |> Maybe.map
+            (\(Enemy enemyData) ->
+                let
+                    newEnemy =
+                        Enemy <|
+                            if enemyData.left > 0 then
+                                { enemyData | left = enemyData.left - 1 }
+                            else
+                                { enemyData
+                                    | left =
+                                        case enemyData.side of
+                                            Green ->
+                                                8
+
+                                            Red ->
+                                                2
+                                    , side =
+                                        case enemyData.side of
+                                            Green ->
+                                                Red
+
+                                            Red ->
+                                                Green
+                                }
+                in
+                Ecs.setComponent withEnemy id newEnemy system
+            )
+        |> Maybe.withDefault system
+
+
+
 --stepSpawning : Model -> Model
 --stepSpawning model =
 --    if model.leftUntilSpawn > 0 then
@@ -445,40 +540,8 @@ controlledByEnemy x y ( enemyPosition, Enemy enemy ) =
 --            , leftUntilSpawn = 8
 --            , corner = modBy 4 (model.corner - 1)
 --        }
---movePlayer : List Enemy -> Int -> Int -> Player -> Maybe Player
---movePlayer enemies deltaX deltaY player =
---    let
---        newX =
---            player.x + deltaX
 --
---        newY =
---            player.y + deltaY
---    in
---    if List.any (controlledByEnemy newX newY) enemies then
---        Nothing
---    else
---        Just { player | x = newX, y = newY }
---stepEnemyTeam : Enemy -> Enemy
---stepEnemyTeam enemy =
---    if enemy.left > 0 then
---        { enemy | left = enemy.left - 1 }
---    else
---        { enemy
---            | left =
---                case enemy.side of
---                    Green ->
---                        8
 --
---                    Red ->
---                        2
---            , side =
---                case enemy.side of
---                    Green ->
---                        Red
---
---                    Red ->
---                        Green
---        }
 --
 --
 --hitEnemies : Player -> List Enemy -> List Enemy
