@@ -40,6 +40,7 @@ type alias Store =
     , position : Dict Id Position
     , player : Dict Id Player
     , enemy : Dict Id Enemy
+    , spawner : Dict Id Spawner
     }
 
 
@@ -69,6 +70,8 @@ withPlayer =
         }
 
 
+{-| TODO: Make components not opaque
+-}
 type Enemy
     = Enemy EnemyData
 
@@ -92,6 +95,19 @@ withEnemy =
         }
 
 
+type alias Spawner =
+    { left : Int
+    }
+
+
+withSpawner : Focus Store Spawner
+withSpawner =
+    Ecs.focus
+        { get = .spawner
+        , set = \value store -> { store | spawner = value }
+        }
+
+
 
 ---- MODEL
 
@@ -108,12 +124,13 @@ init _ =
     ( { leftUntilSpawn = 8
       , corner = 3
       , system =
-            { nextId = 3
+            { nextId = 4
             , position =
                 Dict.fromList
                     [ ( 0, { x = 10, y = 6 } )
                     , ( 1, { x = 0, y = 0 } )
                     , ( 2, { x = 2, y = 5 } )
+                    , ( 3, { x = 4, y = 5 } )
                     ]
             , player =
                 Dict.fromList
@@ -123,6 +140,10 @@ init _ =
                 Dict.fromList
                     [ ( 1, Enemy { left = 3, side = Red } )
                     , ( 2, Enemy { left = 1, side = Red } )
+                    ]
+            , spawner =
+                Dict.fromList
+                    [ ( 3, { left = 8 } )
                     ]
             }
       }
@@ -270,25 +291,6 @@ update msg model =
             ( { model | system = step deltaX deltaY model.system }
             , Cmd.none
             )
-
-        --case movePlayer model.enemies deltaX deltaY model.player of
-        --    Nothing ->
-        --        ( model
-        --        , Cmd.none
-        --        )
-        --    Just newPlayer ->
-        --        ( { model
-        --            | player =
-        --                newPlayer
-        --            , enemies =
-        --                model.enemies
-        --                    -- |> hitEnemies newPlayer
-        --                    |> stepEnemiesPosition newPlayer
-        --            -- |> List.map stepEnemyTeam
-        --          }
-        --          -- TODO: |> stepSpawning
-        --        , Cmd.none
-        --        )
     in
     case msg of
         ArrowUpPressed ->
@@ -316,8 +318,10 @@ step deltaX deltaY system =
     in
     system
         |> stepPlayerMove deltaX deltaY
+        |> stepHitEnemies
         |> stepEnemiesPosition enemyIds
         |> stepEnemiesTeam enemyIds
+        |> stepSpawners
 
 
 
@@ -359,6 +363,52 @@ stepPlayerMove deltaX deltaY system =
                             Ecs.setComponent withPosition playerId newPlayerPosition system
                         )
             )
+        |> Maybe.withDefault system
+
+
+
+-- STEP HIT ENEMIES
+
+
+stepHitEnemies : System Store -> System Store
+stepHitEnemies system =
+    let
+        enemyIds =
+            Ecs.having withEnemy system
+    in
+    List.foldl stepHitEnemy system enemyIds
+
+
+stepHitEnemy : Id -> System Store -> System Store
+stepHitEnemy id system =
+    Maybe.map2
+        (\playerPosition ( enemyPosition, Enemy { side } ) ->
+            case side of
+                Red ->
+                    system
+
+                Green ->
+                    if
+                        (playerPosition.x == enemyPosition.x)
+                            && (playerPosition.y == enemyPosition.y)
+                    then
+                        system
+                            |> Ecs.removeComponent withPosition id
+                            |> Ecs.removeComponent withEnemy id
+                    else
+                        system
+        )
+        (Ecs.having withPlayer system
+            |> List.head
+            |> Maybe.andThen
+                (\playerId ->
+                    Ecs.getComponent withPosition id system
+                )
+        )
+        (Maybe.map2 Tuple.pair
+            (Ecs.getComponent withPosition id system)
+            (Ecs.getComponent withEnemy id system)
+        )
         |> Maybe.withDefault system
 
 
@@ -505,60 +555,44 @@ stepEnemyTeam id system =
 
 
 
---stepSpawning : Model -> Model
---stepSpawning model =
---    if model.leftUntilSpawn > 0 then
---        { model | leftUntilSpawn = model.leftUntilSpawn - 1 }
---    else
---        let
---            ( x, y ) =
---                case model.corner of
---                    0 ->
---                        ( 0, 0 )
---
---                    1 ->
---                        ( width - 1, 0 )
---
---                    2 ->
---                        ( width - 1, height - 1 )
---
---                    3 ->
---                        ( 0, height - 1 )
---
---                    _ ->
---                        ( 0, 0 )
---
---            newEnemy =
---                { left = 3
---                , side = Red
---                , x = x
---                , y = y
---                }
---        in
---        { model
---            | enemies = newEnemy :: model.enemies
---            , leftUntilSpawn = 8
---            , corner = modBy 4 (model.corner - 1)
---        }
---
---
---
---
---hitEnemies : Player -> List Enemy -> List Enemy
---hitEnemies player enemies =
---    let
---        hitEnemy enemy =
---            case enemy.side of
---                Red ->
---                    Just enemy
---
---                Green ->
---                    if (player.x == enemy.x) && (player.y == enemy.y) then
---                        Nothing
---                    else
---                        Just enemy
---    in
---    List.filterMap hitEnemy enemies
+-- STEP SPAWNING
+
+
+stepSpawners : System Store -> System Store
+stepSpawners system =
+    let
+        spawners =
+            Ecs.having withSpawner system
+    in
+    List.foldl stepSpawner system spawners
+
+
+stepSpawner : Id -> System Store -> System Store
+stepSpawner id system =
+    Maybe.map2
+        (\spawner spawnerPosition ->
+            if spawner.left > 0 then
+                Ecs.setComponent withSpawner
+                    id
+                    { spawner | left = spawner.left - 1 }
+                    system
+            else
+                system
+                    |> Ecs.setComponent withSpawner
+                        id
+                        { spawner | left = 25 }
+                    |> Ecs.spawnEntity
+                        (\newId ->
+                            Ecs.setComponent withEnemy newId (Enemy { left = 3, side = Red })
+                                >> Ecs.setComponent withPosition newId spawnerPosition
+                        )
+        )
+        (Ecs.getComponent withSpawner id system)
+        (Ecs.getComponent withPosition id system)
+        |> Maybe.withDefault system
+
+
+
 ---- SUBSCRIPTIONS
 
 

@@ -7,7 +7,9 @@ module Ecs.System
         , getComponent
         , having
         , having2
+        , removeComponent
         , setComponent
+        , spawnEntity
         )
 
 import Dict exposing (Dict)
@@ -64,3 +66,13 @@ having2 focus1 focus2 system =
         (Dict.map (\_ _ -> ()) (focusGet focus1 system))
         (Dict.map (\_ _ -> ()) (focusGet focus2 system))
         |> Dict.keys
+
+
+removeComponent : Focus store component -> Id -> System store -> System store
+removeComponent (Focus { get, set }) id system =
+    set (Dict.remove id (get system)) system
+
+
+spawnEntity : (Id -> System store -> System store) -> System store -> System store
+spawnEntity f system =
+    f system.nextId { system | nextId = system.nextId + 1 }
