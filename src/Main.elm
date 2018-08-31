@@ -318,17 +318,20 @@ step deltaX deltaY system =
     in
     system
         |> stepPlayerMove deltaX deltaY
-        |> stepHitEnemies
-        |> stepEnemiesPosition enemyIds
-        |> stepEnemiesTeam enemyIds
-        |> stepSpawners
+        |> Maybe.map
+            (stepHitEnemies
+                >> stepEnemiesPosition enemyIds
+                >> stepEnemiesTeam enemyIds
+                >> stepSpawners
+            )
+        |> Maybe.withDefault system
 
 
 
 -- STEP PLAYER MOVE
 
 
-stepPlayerMove : Int -> Int -> System Store -> System Store
+stepPlayerMove : Int -> Int -> System Store -> Maybe (System Store)
 stepPlayerMove deltaX deltaY system =
     let
         enemies =
@@ -345,25 +348,35 @@ stepPlayerMove deltaX deltaY system =
         |> Maybe.andThen
             (\playerId ->
                 Ecs.getComponent withPosition playerId system
-                    |> Maybe.map
+                    |> Maybe.andThen
                         (\playerPosition ->
                             let
-                                newX =
-                                    clamp 0 (width - 1) (playerPosition.x + deltaX)
-
-                                newY =
-                                    clamp 0 (height - 1) (playerPosition.y + deltaY)
-
                                 newPlayerPosition =
-                                    if List.any (controlledByEnemy newX newY) enemies then
-                                        playerPosition
-                                    else
-                                        { playerPosition | x = newX, y = newY }
+                                    { playerPosition
+                                        | x = playerPosition.x + deltaX
+                                        , y = playerPosition.y + deltaY
+                                    }
                             in
-                            Ecs.setComponent withPosition playerId newPlayerPosition system
+                            if List.any (controlledByEnemy newPlayerPosition.x newPlayerPosition.y) enemies then
+                                Nothing
+                            else if newPlayerPosition /= normalizePosition newPlayerPosition then
+                                Nothing
+                            else
+                                Just <|
+                                    Ecs.setComponent withPosition
+                                        playerId
+                                        (normalizePosition newPlayerPosition)
+                                        system
                         )
             )
-        |> Maybe.withDefault system
+
+
+normalizePosition : Position -> Position
+normalizePosition position =
+    { position
+        | x = clamp 0 (width - 1) position.x
+        , y = clamp 0 (height - 1) position.y
+    }
 
 
 
