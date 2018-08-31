@@ -130,7 +130,7 @@ init _ =
                     [ ( 0, { x = 10, y = 6 } )
                     , ( 1, { x = 0, y = 0 } )
                     , ( 2, { x = 2, y = 5 } )
-                    , ( 3, { x = 4, y = 5 } )
+                    , ( 3, { x = 0, y = 0 } )
                     ]
             , player =
                 Dict.fromList
@@ -349,10 +349,10 @@ stepPlayerMove deltaX deltaY system =
                         (\playerPosition ->
                             let
                                 newX =
-                                    playerPosition.x + deltaX
+                                    clamp 0 (width - 1) (playerPosition.x + deltaX)
 
                                 newY =
-                                    playerPosition.y + deltaY
+                                    clamp 0 (height - 1) (playerPosition.y + deltaY)
 
                                 newPlayerPosition =
                                     if List.any (controlledByEnemy newX newY) enemies then
@@ -402,7 +402,7 @@ stepHitEnemy id system =
             |> List.head
             |> Maybe.andThen
                 (\playerId ->
-                    Ecs.getComponent withPosition id system
+                    Ecs.getComponent withPosition playerId system
                 )
         )
         (Maybe.map2 Tuple.pair
@@ -479,15 +479,15 @@ stepEnemy otherEnemies playerPosition enemyPosition enemy =
         newEnemyPosition =
             if abs deltaX >= abs deltaY then
                 if deltaX > 0 then
-                    { enemyPosition | x = enemyPosition.x + 1 }
+                    { enemyPosition | x = clamp 0 (width - 1) (enemyPosition.x + 1) }
                 else if deltaX < 0 then
-                    { enemyPosition | x = enemyPosition.x - 1 }
+                    { enemyPosition | x = clamp 0 (width - 1) (enemyPosition.x - 1) }
                 else
                     enemyPosition
             else if deltaY > 0 then
-                { enemyPosition | y = enemyPosition.y + 1 }
+                { enemyPosition | y = clamp 0 (height - 1) (enemyPosition.y + 1) }
             else if deltaY < 0 then
-                { enemyPosition | y = enemyPosition.y - 1 }
+                { enemyPosition | y = clamp 0 (height - 1) (enemyPosition.y - 1) }
             else
                 enemyPosition
     in
