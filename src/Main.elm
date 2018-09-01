@@ -91,9 +91,12 @@ withEnemy =
         }
 
 
-type alias Spawner =
-    { left : Int
-    }
+type Spawner
+    = Spawner
+        { interval : Int
+        , left : Int
+        , spawn : Position -> System Store -> System Store
+        }
 
 
 withSpawner : Focus Store Spawner
@@ -158,34 +161,54 @@ init _ =
                         Ecs.setComponent withPlayer newId Player
                             >> Ecs.setComponent withPosition newId { x = 10, y = 6 }
                     )
-                |> spawnEnemy 0 0 3 Red
-                |> spawnEnemy 2 5 1 Red
-                |> spawnSpawner 0 0 8
-                |> spawnSpawner (width - 1) 0 6
-                |> spawnSpawner (width - 1) (height - 1) 4
-                |> spawnSpawner 0 (height - 1) 2
-                |> spawnMine { x = 5, y = 5 }
-                |> spawnTrapper 8 5 8
+                |> spawnSpawner (spawnEnemy 3 Red) 0 0 32 2
+                |> spawnSpawner (spawnEnemy 1 Red) (width - 1) (height - 1) 32 6
+                |> spawnSpawner (spawnTrapper 8) 0 (height - 1) 32 10
+                |> spawnSpawner (spawnTrapper 8) (width - 1) 0 32 14
       }
     , Cmd.none
     )
 
 
-spawnEnemy : Int -> Int -> Int -> Side -> System Store -> System Store
-spawnEnemy x y left side =
+spawnSpawner :
+    (Position -> System Store -> System Store)
+    -> Int
+    -> Int
+    -> Int
+    -> Int
+    -> System Store
+    -> System Store
+spawnSpawner spawn x y interval left =
+    let
+        newSpawner =
+            Spawner
+                { interval = interval
+                , left = left
+                , spawn = spawn
+                }
+    in
     Ecs.spawnEntity
         (\newId ->
-            Ecs.setComponent withEnemy newId { left = left, side = side }
+            Ecs.setComponent withSpawner newId newSpawner
                 >> Ecs.setComponent withPosition newId { x = x, y = y }
         )
 
 
-spawnSpawner : Int -> Int -> Int -> System Store -> System Store
-spawnSpawner x y left =
+spawnEnemy : Int -> Side -> Position -> System Store -> System Store
+spawnEnemy left side position =
     Ecs.spawnEntity
         (\newId ->
-            Ecs.setComponent withSpawner newId { left = left }
-                >> Ecs.setComponent withPosition newId { x = x, y = y }
+            Ecs.setComponent withEnemy newId { left = left, side = side }
+                >> Ecs.setComponent withPosition newId position
+        )
+
+
+spawnTrapper : Int -> Position -> System Store -> System Store
+spawnTrapper left position =
+    Ecs.spawnEntity
+        (\newId ->
+            Ecs.setComponent withTrapper newId { left = left }
+                >> Ecs.setComponent withPosition newId position
         )
 
 
@@ -194,15 +217,6 @@ spawnMine { x, y } =
     Ecs.spawnEntity
         (\newId ->
             Ecs.setComponent withMine newId Mine
-                >> Ecs.setComponent withPosition newId { x = x, y = y }
-        )
-
-
-spawnTrapper : Int -> Int -> Int -> System Store -> System Store
-spawnTrapper x y left =
-    Ecs.spawnEntity
-        (\newId ->
-            Ecs.setComponent withTrapper newId { left = left }
                 >> Ecs.setComponent withPosition newId { x = x, y = y }
         )
 
@@ -740,22 +754,18 @@ stepSpawners system =
 stepSpawner : Id -> System Store -> System Store
 stepSpawner id system =
     Maybe.map2
-        (\spawner spawnerPosition ->
+        (\(Spawner spawner) spawnerPosition ->
             if spawner.left > 0 then
                 Ecs.setComponent withSpawner
                     id
-                    { spawner | left = spawner.left - 1 }
+                    (Spawner { spawner | left = spawner.left - 1 })
                     system
             else
                 system
                     |> Ecs.setComponent withSpawner
                         id
-                        { spawner | left = 8 }
-                    |> Ecs.spawnEntity
-                        (\newId ->
-                            Ecs.setComponent withEnemy newId { left = 3, side = Red }
-                                >> Ecs.setComponent withPosition newId spawnerPosition
-                        )
+                        (Spawner { spawner | left = spawner.interval })
+                    |> spawner.spawn spawnerPosition
         )
         (Ecs.getComponent withSpawner id system)
         (Ecs.getComponent withPosition id system)
