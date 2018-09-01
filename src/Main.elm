@@ -494,44 +494,47 @@ viewSystem width height system =
             }
 
         pathTiles =
-            List.concat
-                [ Ecs.with2 withSwitcher withPosition system
-                    |> List.filterMap
-                        (\( switcherId, ( _, switcherPosition ) ) ->
-                            Ecs.with2 withPlayer withPosition system
-                                |> List.head
-                                |> Maybe.andThen
-                                    (\( playerId, ( _, playerPosition ) ) ->
-                                        let
-                                            obstacles =
-                                                getObstructedPositions switcherId system
-                                        in
-                                        AStar.compute (aStarConfig width height obstacles)
-                                            ( switcherPosition.x, switcherPosition.y )
-                                            ( playerPosition.x, playerPosition.y )
-                                    )
-                                |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
-                        )
-                    |> List.concat
-                , trappers
-                    |> List.filterMap
-                        (\( trapperId, ( _, trapperPosition ) ) ->
-                            Ecs.with2 withPlayer withPosition system
-                                |> List.head
-                                |> Maybe.andThen
-                                    (\( playerId, ( _, playerPosition ) ) ->
-                                        let
-                                            obstacles =
-                                                getObstructedPositions trapperId system
-                                        in
-                                        AStar.compute (aStarConfig width height obstacles)
-                                            ( trapperPosition.x, trapperPosition.y )
-                                            ( playerPosition.x, playerPosition.y )
-                                    )
-                                |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
-                        )
-                    |> List.concat
-                ]
+            if debugStep then
+                List.concat
+                    [ Ecs.with2 withSwitcher withPosition system
+                        |> List.filterMap
+                            (\( switcherId, ( _, switcherPosition ) ) ->
+                                Ecs.with2 withPlayer withPosition system
+                                    |> List.head
+                                    |> Maybe.andThen
+                                        (\( playerId, ( _, playerPosition ) ) ->
+                                            let
+                                                obstacles =
+                                                    getObstructedPositions switcherId system
+                                            in
+                                            AStar.compute (aStarConfig width height obstacles)
+                                                ( switcherPosition.x, switcherPosition.y )
+                                                ( playerPosition.x, playerPosition.y )
+                                        )
+                                    |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
+                            )
+                        |> List.concat
+                    , trappers
+                        |> List.filterMap
+                            (\( trapperId, ( _, trapperPosition ) ) ->
+                                Ecs.with2 withPlayer withPosition system
+                                    |> List.head
+                                    |> Maybe.andThen
+                                        (\( playerId, ( _, playerPosition ) ) ->
+                                            let
+                                                obstacles =
+                                                    getObstructedPositions trapperId system
+                                            in
+                                            AStar.compute (aStarConfig width height obstacles)
+                                                ( trapperPosition.x, trapperPosition.y )
+                                                ( playerPosition.x, playerPosition.y )
+                                        )
+                                    |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
+                            )
+                        |> List.concat
+                    ]
+            else
+                []
 
         redTiles =
             redSwitcherTiles
