@@ -54,6 +54,7 @@ type alias Store =
     , obstruction : Dict Id Obstruction
     , control : Dict Id Control
     , player : Dict Id Player
+    , rester : Dict Id Rester
     , switcher : Dict Id Switcher
     , spawner : Dict Id Spawner
     , mine : Dict Id Mine
@@ -70,6 +71,7 @@ removeEntity id system =
         |> Ecs.removeComponent withObstruction id
         |> Ecs.removeComponent withControl id
         |> Ecs.removeComponent withPlayer id
+        |> Ecs.removeComponent withRester id
         |> Ecs.removeComponent withSwitcher id
         |> Ecs.removeComponent withSpawner id
         |> Ecs.removeComponent withMine id
@@ -159,6 +161,10 @@ type Player
     = Player
 
 
+type Rester
+    = Rester
+
+
 type alias Switcher =
     { left : Int
     }
@@ -178,6 +184,7 @@ type Mine
 
 type alias Trapper =
     { left : Int
+    , interval : Int
     }
 
 
@@ -266,6 +273,7 @@ emptySystem =
     { nextId = 0
     , position = Dict.empty
     , player = Dict.empty
+    , rester = Dict.empty
     , switcher = Dict.empty
     , spawner = Dict.empty
     , mine = Dict.empty
@@ -279,52 +287,144 @@ emptySystem =
 
 allLevels : List Level
 allLevels =
-    [ level0
-    , level1
+    [ l0
+    , l1
+    , l2
+    , l3
+    , l4
     ]
 
 
-level0 : Level
-level0 =
+l0 =
     let
-        width =
-            6
-
-        height =
-            6
+        ( width, height ) =
+            ( 5, 5 )
     in
-    { name = "Level #0"
+    { name = "#0"
     , width = width
     , height = height
     , system =
         emptySystem
-            |> spawnPlayer { x = 5, y = 5 }
-            |> spawnSwitcher { x = 0, y = 0 } { left = 3 }
-    , info = "Press the Arrow Keys!"
-    , isFinished = isFinished width height 10
+            |> spawnPlayer (Position 4 4)
+            |> spawnRester 1 1
+    , info = "Use the Arrow Keys!"
+    , isFinished =
+        \system ->
+            if List.isEmpty (Ecs.with withObstruction system) then
+                Won 5
+            else
+                Running
     }
 
 
-level1 : Level
-level1 =
+l1 =
     let
-        width =
-            9
-
-        height =
-            9
+        ( width, height ) =
+            ( 7, 7 )
     in
-    { name = "Level #1"
+    { name = "#1"
     , width = width
     , height = height
     , system =
         emptySystem
-            |> spawnPlayer { x = 4, y = 4 }
-            -- |> spawnSwitcher { x = 0, y = 0 } { left = 1 }
-            |> spawnChessRook { x = 0, y = 0 }
-            |> spawnTrapper { x = width - 1, y = height - 1 } { left = 8 }
+            |> spawnPlayer (Position 1 5)
+            |> spawnRester 1 1
+            |> spawnRester 5 5
+            |> spawnWall 0 3
+            |> spawnWall 2 3
+            |> spawnWall 3 3
+            |> spawnWall 4 3
+            |> spawnWall 5 3
+            |> spawnWall 6 3
+    , info = "Collect everything to proceed!"
+    , isFinished =
+        \system ->
+            if List.isEmpty (Ecs.with withRester system) then
+                Won 10
+            else
+                Running
+    }
+
+
+l2 =
+    let
+        ( width, height ) =
+            ( 5, 5 )
+    in
+    { name = "#2"
+    , width = width
+    , height = height
+    , system =
+        emptySystem
+            |> spawnPlayer (Position 4 0)
+            |> spawnTrapper { x = 1, y = 3 } { interval = 2, left = 1 }
+    , info = "Don't get trapped!"
+    , isFinished =
+        \system ->
+            let
+                trapperGone =
+                    List.isEmpty (Ecs.having withTrapper system)
+
+                trapperTrapped =
+                    Ecs.with2 withTrapper withPosition system
+                        |> List.head
+                        |> Maybe.map (Tuple.second >> Tuple.second)
+                        |> Maybe.map
+                            (\position ->
+                                List.isEmpty
+                                    (neighbours width height obstacles ( position.x, position.y ))
+                            )
+                        |> Maybe.withDefault False
+
+                obstacles =
+                    getObstructedPositions -1 system
+            in
+            if trapperGone then
+                Won 15
+            else if trapperTrapped then
+                Lost 0
+            else
+                Running
+    }
+
+
+l3 =
+    let
+        ( width, height ) =
+            ( 9, 9 )
+    in
+    { name = "#3"
+    , width = width
+    , height = height
+    , system =
+        emptySystem
+            |> spawnPlayer (Position 4 4)
+            |> spawnSwitcher { x = 1, y = 1 } { left = 2 }
     , info = "Watch out!"
     , isFinished = isFinished width height 20
+    }
+
+
+l4 =
+    let
+        ( width, height ) =
+            ( 9, 9 )
+    in
+    { name = "#3"
+    , width = width
+    , height = height
+    , system =
+        emptySystem
+            |> spawnPlayer (Position 7 4)
+            |> spawnSwitcher { x = 1, y = 1 } { left = 2 }
+            |> spawnSwitcher { x = 2, y = 7 } { left = 5 }
+            |> spawnWall 4 2
+            |> spawnWall 4 3
+            |> spawnWall 4 4
+            |> spawnWall 4 5
+            |> spawnWall 4 6
+    , info = "Watch out!"
+    , isFinished = isFinished width height 25
     }
 
 
@@ -450,6 +550,29 @@ spawnSpawner position spawner =
             identity
                 >> Ecs.setComponent withSpawner newId spawner
                 >> Ecs.setComponent withPosition newId position
+        )
+
+
+spawnRester : Int -> Int -> System Store -> System Store
+spawnRester x y =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withRester newId Rester
+                >> Ecs.setComponent withPosition newId (Position x y)
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withSprite newId SwitcherSprite
+        )
+
+
+spawnWall : Int -> Int -> System Store -> System Store
+spawnWall x y =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withPosition newId (Position x y)
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withControl newId MineControl
         )
 
 
@@ -991,6 +1114,7 @@ fight : System Store -> System Store
 fight system =
     system
         |> fightEnemies
+        |> fightResters
         |> fightTrappers
 
 
@@ -1021,6 +1145,29 @@ fightSwitcher ( id, ( switcher, switcherPosition ) ) system =
             |> List.head
             |> Maybe.map (Tuple.second >> Tuple.second)
         )
+        |> Maybe.withDefault system
+
+
+fightResters : System Store -> System Store
+fightResters system =
+    List.foldl fightRester system (Ecs.with2 withRester withPosition system)
+
+
+fightRester : ( Id, ( Rester, Position ) ) -> System Store -> System Store
+fightRester ( id, ( rester, resterPosition ) ) system =
+    Ecs.with2 withPlayer withPosition system
+        |> List.head
+        |> Maybe.map (Tuple.second >> Tuple.second)
+        |> Maybe.map
+            (\playerPosition ->
+                if
+                    (playerPosition.x == resterPosition.x)
+                        && (playerPosition.y == resterPosition.y)
+                then
+                    removeEntity id system
+                else
+                    system
+            )
         |> Maybe.withDefault system
 
 
@@ -1099,27 +1246,34 @@ random width height obstacles position playerPosition =
     let
         newPosition =
             normalizePosition width height <|
-                { x = position.x + deltaX
-                , y = position.y + deltaY
+                { x = newX
+                , y = newY
                 }
 
-        ( deltaX, deltaY ) =
-            Random.step
-                (Random.weighted
-                    ( 0.25, ( -1, 0 ) )
-                    [ ( 0.25, ( 1, 0 ) )
-                    , ( 0.25, ( 0, -1 ) )
-                    , ( 0.25, ( 0, 1 ) )
-                    ]
-                )
-                (Random.initialSeed
-                    (width * playerPosition.x
-                        + playerPosition.y
-                    )
-                )
-                |> Tuple.first
+        ( newX, newY ) =
+            case neighbours width height obstacles ( position.x, position.y ) of
+                [] ->
+                    ( position.x, position.y )
+
+                first :: rest ->
+                    let
+                        distribution =
+                            1 / (1 + toFloat (List.length rest))
+                    in
+                    Random.step
+                        (Random.weighted
+                            ( distribution, first )
+                            (List.map (Tuple.pair distribution) rest)
+                        )
+                        (Random.initialSeed
+                            (width
+                                * playerPosition.x
+                                + playerPosition.y
+                            )
+                        )
+                        |> Tuple.first
     in
-    if List.member newPosition obstacles || newPosition == playerPosition then
+    if newPosition == playerPosition then
         position
     else
         newPosition
@@ -1215,7 +1369,7 @@ stepTrapperHelp ( id, ( trapper, trapperPosition ) ) system =
             system
     else
         system
-            |> Ecs.setComponent withTrapper id { trapper | left = 8 }
+            |> Ecs.setComponent withTrapper id { trapper | left = trapper.interval }
             |> spawnMine trapperPosition
 
 
@@ -1324,6 +1478,14 @@ withPlayer =
     Ecs.focus
         { get = .player
         , set = \value store -> { store | player = value }
+        }
+
+
+withRester : Focus Store Rester
+withRester =
+    Ecs.focus
+        { get = .rester
+        , set = \value store -> { store | rester = value }
         }
 
 
