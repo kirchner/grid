@@ -266,14 +266,36 @@ viewGrid system =
                             |> Maybe.map (Tuple.second >> Tuple.second)
                             |> Maybe.andThen
                                 (\playerPosition ->
-                                    AStar.compute width
-                                        height
+                                    AStar.compute aStarConfig
                                         ( redTile.x, redTile.y )
                                         ( playerPosition.x, playerPosition.y )
                                 )
                             |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
                     )
                 |> List.concat
+
+        aStarConfig =
+            { heuristicCostEstimate =
+                \goal current ->
+                    toFloat <|
+                        ((Tuple.first goal - Tuple.first current) ^ 2)
+                            + ((Tuple.second goal - Tuple.second current) ^ 2)
+            , neighbours =
+                \( x, y ) ->
+                    let
+                        outOfBounds ( neighbourX, neighbourY ) =
+                            (neighbourX < 0)
+                                || (neighbourX > width)
+                                || (neighbourY < 0)
+                                || (neighbourY > height)
+                    in
+                    List.filter (not << outOfBounds)
+                        [ ( x, y + 1 )
+                        , ( x - 1, y )
+                        , ( x + 1, y )
+                        , ( x, y - 1 )
+                        ]
+            }
 
         redTiles =
             List.concat

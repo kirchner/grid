@@ -1,4 +1,9 @@
-module AStar exposing (Node, compute)
+module AStar
+    exposing
+        ( Config
+        , Node
+        , compute
+        )
 
 import Dict exposing (Dict)
 import Set exposing (Set)
@@ -26,18 +31,24 @@ type Step
     | Impossible
 
 
-compute : Int -> Int -> Node -> Node -> Maybe (List Node)
-compute width height start goal =
+type alias Config =
+    { heuristicCostEstimate : Node -> Node -> Float
+    , neighbours : Node -> List Node
+    }
+
+
+compute : Config -> Node -> Node -> Maybe (List Node)
+compute config start goal =
     let
         initialState =
             { closedSet = Set.empty
             , openSet = Set.singleton start
-            , fScore = Dict.singleton start (h goal start)
+            , fScore = Dict.singleton start (config.heuristicCostEstimate goal start)
             , gScore = Dict.singleton start 0
             , cameFrom = Dict.empty
             }
     in
-    loop width height goal (Loop initialState)
+    loop config goal (Loop initialState)
         |> Maybe.map reconstructPath
 
 
@@ -56,8 +67,8 @@ reconstructPathHelp path cameFrom current =
             reconstructPathHelp (next :: path) cameFrom next
 
 
-loop : Int -> Int -> Node -> Step -> Maybe { cameFrom : Dict Node Node, current : Node }
-loop width height goal step =
+loop : Config -> Node -> Step -> Maybe { cameFrom : Dict Node Node, current : Node }
+loop config goal step =
     case step of
         Done data ->
             Just data
@@ -66,11 +77,11 @@ loop width height goal step =
             Nothing
 
         Loop newState ->
-            loop width height goal (iterate width height goal newState)
+            loop config goal (iterate config goal newState)
 
 
-iterate : Int -> Int -> Node -> StarState -> Step
-iterate width height goal ({ closedSet, openSet, fScore, gScore, cameFrom } as state) =
+iterate : Config -> Node -> StarState -> Step
+iterate { neighbours, heuristicCostEstimate } goal ({ closedSet, openSet, fScore, gScore, cameFrom } as state) =
     case
         openSet
             |> Set.toList
@@ -121,7 +132,7 @@ iterate width height goal ({ closedSet, openSet, fScore, gScore, cameFrom } as s
 
                             newFScore =
                                 Dict.insert neighbour
-                                    (tentativeGScore + h goal neighbour)
+                                    (tentativeGScore + heuristicCostEstimate goal neighbour)
                                     intermediateState.fScore
                         in
                         if Set.member neighbour closedSet then
@@ -143,34 +154,10 @@ iterate width height goal ({ closedSet, openSet, fScore, gScore, cameFrom } as s
                             }
                 in
                 Loop
-                    (neighbours width height current
+                    (neighbours current
                         |> List.foldl folder
                             { state
                                 | openSet = Set.remove current openSet
                                 , closedSet = Set.insert current closedSet
                             }
                     )
-
-
-h : Node -> Node -> Float
-h goal current =
-    toFloat <|
-        abs (Tuple.first goal - Tuple.first current)
-            + abs (Tuple.second goal - Tuple.second current)
-
-
-neighbours : Int -> Int -> Node -> List Node
-neighbours width height ( x, y ) =
-    let
-        outOfBounds ( neighbourX, neighbourY ) =
-            (neighbourX < 0)
-                || (neighbourX > width)
-                || (neighbourY < 0)
-                || (neighbourY > height)
-    in
-    List.filter (not << outOfBounds)
-        [ ( x, y + 1 )
-        , ( x - 1, y )
-        , ( x + 1, y )
-        , ( x, y - 1 )
-        ]
