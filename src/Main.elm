@@ -62,6 +62,8 @@ type alias Store =
     , mine : Dict Id Mine
     , trapper : Dict Id Trapper
     , sprite : Dict Id Sprite
+    , archer : Dict Id Archer
+    , fightable : Dict Id Fightable
     }
 
 
@@ -79,6 +81,26 @@ removeEntity id system =
         |> Ecs.removeComponent withMine id
         |> Ecs.removeComponent withTrapper id
         |> Ecs.removeComponent withSprite id
+        |> Ecs.removeComponent withArcher id
+        |> Ecs.removeComponent withFightable id
+
+
+emptySystem =
+    { nextId = 0
+    , position = Dict.empty
+    , player = Dict.empty
+    , rester = Dict.empty
+    , switcher = Dict.empty
+    , spawner = Dict.empty
+    , mine = Dict.empty
+    , trapper = Dict.empty
+    , movement = Dict.empty
+    , obstruction = Dict.empty
+    , control = Dict.empty
+    , sprite = Dict.empty
+    , archer = Dict.empty
+    , fightable = Dict.empty
+    }
 
 
 
@@ -133,6 +155,7 @@ type Control
     = SwitcherControl
     | MineControl
     | ChessRookControl
+    | ArcherControl
 
 
 rasterizeControl : Int -> Int -> Control -> Position -> List Position
@@ -157,6 +180,13 @@ rasterizeControl width height control position =
             ChessRookControl ->
                 List.map (\x -> { x = x, y = 0 }) (List.range (1 - width) (width - 1))
                     ++ List.map (\y -> { x = 0, y = y }) (List.range (1 - height) (height - 1))
+
+            ArcherControl ->
+                [ Position -1 -1
+                , Position -1 1
+                , Position 1 -1
+                , Position 1 1
+                ]
 
 
 type Player
@@ -195,6 +225,7 @@ type Sprite
     | TrapperSprite
     | ChessRookSprite
     | PlayerSprite
+    | ArcherSprite
 
 
 spriteIcon : Sprite -> String
@@ -212,6 +243,9 @@ spriteIcon sprite =
         PlayerSprite ->
             "frog"
 
+        ArcherSprite ->
+            "feather"
+
 
 spriteForegroundColor : Sprite -> Element.Color
 spriteForegroundColor sprite =
@@ -227,6 +261,17 @@ spriteForegroundColor sprite =
 
         PlayerSprite ->
             Element.rgb 0 0 0
+
+        ArcherSprite ->
+            Element.rgb 0 0 0
+
+
+type Fightable
+    = Fightable
+
+
+type Archer
+    = Archer
 
 
 
@@ -282,25 +327,9 @@ type Finished
     | Won Int
 
 
-emptySystem =
-    { nextId = 0
-    , position = Dict.empty
-    , player = Dict.empty
-    , rester = Dict.empty
-    , switcher = Dict.empty
-    , spawner = Dict.empty
-    , mine = Dict.empty
-    , trapper = Dict.empty
-    , movement = Dict.empty
-    , obstruction = Dict.empty
-    , control = Dict.empty
-    , sprite = Dict.empty
-    }
-
-
 allLevels : List Level
 allLevels =
-    [ l0
+    [ l5
     , l1
     , l2
     , l3
@@ -441,6 +470,42 @@ l4 =
     }
 
 
+l5 =
+    let
+        ( width, height ) =
+            ( 5, 5 )
+    in
+    { name = "#0"
+    , width = width
+    , height = height
+    , system =
+        emptySystem
+            |> spawnPlayer (Position 1 1)
+            |> spawnArcher (Position 4 4)
+    , info = "Use the Arrow Keys!"
+    , isFinished =
+        \system ->
+            if List.isEmpty (Ecs.with withObstruction system) then
+                Won 5
+            else
+                Running
+    }
+
+
+spawnArcher : Position -> System Store -> System Store
+spawnArcher position =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withArcher newId Archer
+                >> Ecs.setComponent withPosition newId position
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withControl newId ArcherControl
+                >> Ecs.setComponent withSprite newId ArcherSprite
+                >> Ecs.setComponent withFightable newId Fightable
+        )
+
+
 isFinished : Int -> Int -> Int -> System Store -> Finished
 isFinished width height score system =
     let
@@ -515,6 +580,7 @@ spawnSwitcher position switcher =
                 >> Ecs.setComponent withMovement newId { strategy = MoveToPlayer }
                 >> Ecs.setComponent withControl newId SwitcherControl
                 >> Ecs.setComponent withSprite newId SwitcherSprite
+                >> Ecs.setComponent withFightable newId Fightable
         )
 
 
@@ -528,6 +594,7 @@ spawnChessRook position =
                 >> Ecs.setComponent withMovement newId { strategy = MoveToPlayer }
                 >> Ecs.setComponent withControl newId ChessRookControl
                 >> Ecs.setComponent withSprite newId ChessRookSprite
+                >> Ecs.setComponent withFightable newId Fightable
         )
 
 
@@ -541,6 +608,7 @@ spawnTrapper position trapper =
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withMovement newId { strategy = Random }
                 >> Ecs.setComponent withSprite newId TrapperSprite
+                >> Ecs.setComponent withFightable newId Fightable
         )
 
 
@@ -575,6 +643,7 @@ spawnRester x y =
                 >> Ecs.setComponent withPosition newId (Position x y)
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withSprite newId SwitcherSprite
+                >> Ecs.setComponent withFightable newId Fightable
         )
 
 
@@ -1143,6 +1212,7 @@ step width height deltaX deltaY system =
                 >> stepTrapper
                 >> stepEnemies
                 >> stepSpawners
+                >> stepArchers width height
             )
         |> Maybe.withDefault system
         |> optionallyDebugStep
@@ -1190,94 +1260,29 @@ movePlayer width height deltaX deltaY system =
 
 
 
--- FIGHT
+-- COMPONENT FIGHTABLE
 
 
 fight : System Store -> System Store
 fight system =
-    system
-        |> fightEnemies
-        |> fightResters
-        |> fightTrappers
+    Ecs.with2 withFightable withPosition system
+        |> List.foldl fightEntity system
 
 
-fightEnemies : System Store -> System Store
-fightEnemies system =
-    List.foldl fightSwitcher system (Ecs.with2 withSwitcher withPosition system)
-
-
-fightSwitcher : ( Id, ( Switcher, Position ) ) -> System Store -> System Store
-fightSwitcher ( id, ( switcher, switcherPosition ) ) system =
-    let
-        hasControl =
-            Ecs.getComponent withControl id system /= Nothing
-    in
-    Maybe.map
-        (\playerPosition ->
-            if hasControl then
-                system
-            else if
-                (playerPosition.x == switcherPosition.x)
-                    && (playerPosition.y == switcherPosition.y)
-            then
-                removeEntity id system
-            else
-                system
-        )
-        (Ecs.with2 withPlayer withPosition system
-            |> List.head
-            |> Maybe.map (Tuple.second >> Tuple.second)
-        )
-        |> Maybe.withDefault system
-
-
-fightResters : System Store -> System Store
-fightResters system =
-    List.foldl fightRester system (Ecs.with2 withRester withPosition system)
-
-
-fightRester : ( Id, ( Rester, Position ) ) -> System Store -> System Store
-fightRester ( id, ( rester, resterPosition ) ) system =
-    Ecs.with2 withPlayer withPosition system
-        |> List.head
-        |> Maybe.map (Tuple.second >> Tuple.second)
-        |> Maybe.map
+fightEntity : ( Id, ( Fightable, Position ) ) -> System Store -> System Store
+fightEntity ( id, ( _, position ) ) system =
+    Maybe.withDefault system <|
+        Maybe.map
             (\playerPosition ->
-                if
-                    (playerPosition.x == resterPosition.x)
-                        && (playerPosition.y == resterPosition.y)
-                then
+                if position == playerPosition then
                     removeEntity id system
                 else
                     system
             )
-        |> Maybe.withDefault system
-
-
-fightTrappers : System Store -> System Store
-fightTrappers system =
-    List.foldl fightTrapper system (Ecs.with2 withTrapper withPosition system)
-
-
-fightTrapper : ( Id, ( Trapper, Position ) ) -> System Store -> System Store
-fightTrapper ( id, ( trapper, trapperPosition ) ) system =
-    Maybe.map
-        (\playerPosition ->
-            if
-                (playerPosition.x == trapperPosition.x)
-                    && (playerPosition.y == trapperPosition.y)
-            then
-                system
-                    |> Ecs.removeComponent withPosition id
-                    |> Ecs.removeComponent withTrapper id
-            else
-                system
-        )
-        (Ecs.with2 withPlayer withPosition system
-            |> List.head
-            |> Maybe.map (Tuple.second >> Tuple.second)
-        )
-        |> Maybe.withDefault system
+            (Ecs.with2 withPlayer withPosition system
+                |> List.head
+                |> Maybe.map (Tuple.second >> Tuple.second)
+            )
 
 
 
@@ -1310,6 +1315,48 @@ moveEntity width height ( id, ( movement, position ) ) system =
 
                 MoveToPlayer ->
                     walkTo width height obstacles position
+            )
+        |> Maybe.map
+            (\newPosition ->
+                Ecs.setComponent withPosition id newPosition system
+            )
+        |> Maybe.withDefault system
+
+
+
+-- STEP ARCHER ENTITIES
+
+
+stepArchers : Int -> Int -> System Store -> System Store
+stepArchers width height system =
+    List.foldl (moveArcher width height)
+        system
+        (Ecs.with2 withArcher withPosition system)
+
+
+moveArcher : Int -> Int -> ( Id, ( Archer, Position ) ) -> System Store -> System Store
+moveArcher width height ( id, ( archer, position ) ) system =
+    let
+        obstacles =
+            getObstructedPositions id system
+
+        playerPosition =
+            Ecs.with2 withPlayer withPosition system
+                |> List.head
+                |> Maybe.map (Tuple.second >> Tuple.second)
+    in
+    playerPosition
+        |> Maybe.map
+            (\playerPosition_ ->
+                let
+                    distanceToPlayer =
+                        min (abs (position.x - playerPosition_.x))
+                            (abs (position.y - playerPosition_.y))
+                in
+                if distanceToPlayer <= 1 then
+                    random width height obstacles position playerPosition_
+                else
+                    walkTo width height obstacles position playerPosition_
             )
         |> Maybe.map
             (\newPosition ->
@@ -1609,4 +1656,20 @@ withSprite =
     Ecs.focus
         { get = .sprite
         , set = \value store -> { store | sprite = value }
+        }
+
+
+withArcher : Focus Store Archer
+withArcher =
+    Ecs.focus
+        { get = .archer
+        , set = \value store -> { store | archer = value }
+        }
+
+
+withFightable : Focus Store Fightable
+withFightable =
+    Ecs.focus
+        { get = .fightable
+        , set = \value store -> { store | fightable = value }
         }
