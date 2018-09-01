@@ -28,6 +28,8 @@ import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
 import Element.Input as Input
+import Html
+import Html.Attributes as Attributes
 import Json.Decode as Decode
 
 
@@ -175,7 +177,41 @@ type alias Trapper =
 
 type Sprite
     = SwitcherSprite
+    | TrapperSprite
+    | ChessRookSprite
     | PlayerSprite
+
+
+spriteIcon : Sprite -> String
+spriteIcon sprite =
+    case sprite of
+        SwitcherSprite ->
+            "chess-pawn"
+
+        TrapperSprite ->
+            "chess-bishop"
+
+        ChessRookSprite ->
+            "chess-rook"
+
+        PlayerSprite ->
+            "chess-queen"
+
+
+spriteForegroundColor : Sprite -> Element.Color
+spriteForegroundColor sprite =
+    case sprite of
+        SwitcherSprite ->
+            Element.rgb 0 0 0
+
+        TrapperSprite ->
+            Element.rgb 0 0 0
+
+        ChessRookSprite ->
+            Element.rgb 0 0 0
+
+        PlayerSprite ->
+            Element.rgb 0 0 0
 
 
 
@@ -356,7 +392,7 @@ spawnChessRook position =
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withMovement newId Movement
                 >> Ecs.setComponent withControl newId ChessRookControl
-                >> Ecs.setComponent withSprite newId SwitcherSprite
+                >> Ecs.setComponent withSprite newId ChessRookSprite
         )
 
 
@@ -369,7 +405,7 @@ spawnTrapper position trapper =
                 >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withMovement newId Movement
-                >> Ecs.setComponent withSprite newId SwitcherSprite
+                >> Ecs.setComponent withSprite newId TrapperSprite
         )
 
 
@@ -382,7 +418,6 @@ spawnMine position =
                 >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withControl newId MineControl
-                >> Ecs.setComponent withSprite newId SwitcherSprite
         )
 
 
@@ -467,14 +502,6 @@ viewWelcome =
 -- IN LEVEL
 
 
-type alias Tiles =
-    { red : List Position
-    , green : List Position
-    , lightRed : List Position
-    , path : List Position
-    }
-
-
 viewLevel : Int -> Int -> Level -> Element Msg
 viewLevel score name { width, height, system, info } =
     Element.column
@@ -501,165 +528,126 @@ viewLevel score name { width, height, system, info } =
         ]
 
 
+type alias TileInfo =
+    { backgroundColors : Dict ( Int, Int ) Element.Color
+    , foregroundColors : Dict ( Int, Int ) Element.Color
+    , icons : Dict ( Int, Int ) String
+    , infos : Dict ( Int, Int ) String
+    }
+
+
+computeTileInfo : Int -> Int -> System Store -> TileInfo
+computeTileInfo width height system =
+    { backgroundColors =
+        [ Ecs.with2 withControl withPosition system
+            |> List.concatMap
+                (\( controlId, ( control, position ) ) ->
+                    rasterizeControl width height control position
+                )
+            |> List.map (\position -> ( ( position.x, position.y ), Element.rgb 1 0.5 0.5 ))
+        , Ecs.with2 withPlayer withPosition system
+            |> List.map (Tuple.second >> Tuple.second)
+            |> List.map (\position -> ( ( position.x, position.y ), Element.rgb 0 1 0 ))
+        ]
+            |> List.concat
+            |> Dict.fromList
+    , foregroundColors =
+        Ecs.with2 withSprite withPosition system
+            |> List.map
+                (\( spriteId, ( sprite, spritePosition ) ) ->
+                    ( ( spritePosition.x, spritePosition.y ), spriteForegroundColor sprite )
+                )
+            |> Dict.fromList
+    , icons =
+        Ecs.with2 withSprite withPosition system
+            |> List.map
+                (\( spriteId, ( sprite, spritePosition ) ) ->
+                    ( ( spritePosition.x, spritePosition.y ), spriteIcon sprite )
+                )
+            |> Dict.fromList
+    , infos =
+        [ Ecs.with2 withSwitcher withPosition system
+            |> List.map
+                (\( _, ( { left }, switcherPosition ) ) ->
+                    ( ( switcherPosition.x, switcherPosition.y )
+                    , String.fromInt left
+                    )
+                )
+        , Ecs.with2 withTrapper withPosition system
+            |> List.map
+                (\( _, ( { left }, trapperPosition ) ) ->
+                    ( ( trapperPosition.x, trapperPosition.y )
+                    , String.fromInt left
+                    )
+                )
+        ]
+            |> List.concat
+            |> Dict.fromList
+    }
+
+
 viewSystem : Int -> Int -> System Store -> Element Msg
 viewSystem width height system =
-    let
-        tiles =
-            { red = redTiles
-            , green = greenTiles
-            , lightRed = controlledTiles
-            , path = pathTiles
-            }
-
-        pathTiles =
-            if debugStep then
-                List.concat
-                    [ Ecs.with2 withSwitcher withPosition system
-                        |> List.filterMap
-                            (\( switcherId, ( _, switcherPosition ) ) ->
-                                Ecs.with2 withPlayer withPosition system
-                                    |> List.head
-                                    |> Maybe.andThen
-                                        (\( playerId, ( _, playerPosition ) ) ->
-                                            let
-                                                obstacles =
-                                                    getObstructedPositions switcherId system
-                                            in
-                                            AStar.compute (aStarConfig width height obstacles)
-                                                ( switcherPosition.x, switcherPosition.y )
-                                                ( playerPosition.x, playerPosition.y )
-                                        )
-                                    |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
-                            )
-                        |> List.concat
-                    , trappers
-                        |> List.filterMap
-                            (\( trapperId, ( _, trapperPosition ) ) ->
-                                Ecs.with2 withPlayer withPosition system
-                                    |> List.head
-                                    |> Maybe.andThen
-                                        (\( playerId, ( _, playerPosition ) ) ->
-                                            let
-                                                obstacles =
-                                                    getObstructedPositions trapperId system
-                                            in
-                                            AStar.compute (aStarConfig width height obstacles)
-                                                ( trapperPosition.x, trapperPosition.y )
-                                                ( playerPosition.x, playerPosition.y )
-                                        )
-                                    |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
-                            )
-                        |> List.concat
-                    ]
-            else
-                []
-
-        redTiles =
-            redSwitcherTiles
-
-        redSwitcherTiles =
-            Ecs.with2 withSprite withPosition system
-                |> List.filterMap
-                    (\( spriteId, ( sprite, switcherPosition ) ) ->
-                        case sprite of
-                            SwitcherSprite ->
-                                if List.member switcherPosition controlledTiles then
-                                    Just switcherPosition
-                                else
-                                    Nothing
-
-                            _ ->
-                                Nothing
-                    )
-
-        greenSwitcherTiles =
-            Ecs.with2 withSprite withPosition system
-                |> List.filterMap
-                    (\( spriteId, ( sprite, switcherPosition ) ) ->
-                        case sprite of
-                            SwitcherSprite ->
-                                if List.member switcherPosition controlledTiles then
-                                    Nothing
-                                else
-                                    Just switcherPosition
-
-                            _ ->
-                                Nothing
-                    )
-
-        controlledTiles =
-            Ecs.with2 withControl withPosition system
-                |> List.concatMap
-                    (\( controlId, ( control, position ) ) ->
-                        rasterizeControl width height control position
-                    )
-
-        greenTiles =
-            List.concat
-                [ playerTiles
-                , trapperTiles
-                , greenSwitcherTiles
-                ]
-
-        playerTiles =
-            Ecs.with2 withPlayer withPosition system
-                |> List.map (Tuple.second >> Tuple.second)
-
-        trapperTiles =
-            trappers
-                |> List.map (Tuple.second >> Tuple.second)
-
-        trappers =
-            Ecs.with2 withTrapper withPosition system
-
-        mineTiles =
-            Ecs.with2 withMine withPosition system
-                |> List.map (Tuple.second >> Tuple.second)
-    in
     Element.column
         [ Border.width 1
         , Border.color (Element.rgb 0 0 0)
         ]
         (List.range 0 (height - 1)
-            |> List.map (viewRow width height tiles system)
+            |> List.map (viewRow width height (computeTileInfo width height system) system)
         )
 
 
-viewRow : Int -> Int -> Tiles -> System Store -> Int -> Element Msg
-viewRow width height tiles system rowIndex =
+viewRow : Int -> Int -> TileInfo -> System Store -> Int -> Element Msg
+viewRow width height tileInfo system rowIndex =
     Element.row []
         (List.range 0 (width - 1)
-            |> List.map (viewTile tiles system rowIndex)
+            |> List.map (viewTile tileInfo system rowIndex)
         )
 
 
-viewTile : Tiles -> System Store -> Int -> Int -> Element Msg
-viewTile tiles system rowIndex columnIndex =
+viewTile : TileInfo -> System Store -> Int -> Int -> Element Msg
+viewTile tileInfo system rowIndex columnIndex =
     let
         backgroundColor =
-            let
-                tilePosition =
-                    { x = columnIndex, y = rowIndex }
-            in
-            if List.member tilePosition tiles.red then
-                Element.rgb 1 0 0
-            else if List.member tilePosition tiles.green then
-                Element.rgb 0 1 0
-            else if List.member tilePosition tiles.lightRed then
-                Element.rgb 1 0.5 0.5
-            else if List.member tilePosition tiles.path then
-                Element.rgb 0.5 0.5 1
-            else
-                Element.rgb 1 1 1
+            Dict.get ( columnIndex, rowIndex ) tileInfo.backgroundColors
+                |> Maybe.withDefault (Element.rgb 1 1 1)
+
+        foregroundColor =
+            Dict.get ( columnIndex, rowIndex ) tileInfo.foregroundColors
+                |> Maybe.withDefault (Element.rgb 0 0 0)
+
+        iconName =
+            Dict.get ( columnIndex, rowIndex ) tileInfo.icons
+                |> Maybe.withDefault ""
+
+        info =
+            Dict.get ( columnIndex, rowIndex ) tileInfo.infos
     in
     Element.el
         [ Element.width (Element.px 80)
         , Element.height (Element.px 80)
         , Border.width 2
         , Border.color (Element.rgb 0 0 0)
+        , Font.color foregroundColor
         , Background.color backgroundColor
+        , Element.above <|
+            case info of
+                Nothing ->
+                    Element.none
+
+                Just infoText ->
+                    Element.el
+                        [ Element.width Element.fill
+                        , Font.size 24
+                        , Element.moveDown 28
+                        , Element.moveLeft 5
+                        ]
+                        (Element.el
+                            [ Element.alignRight ]
+                            (Element.text infoText)
+                        )
         ]
-        Element.none
+        (icon iconName)
 
 
 
@@ -732,6 +720,22 @@ viewGameOver score level =
                 ]
         ]
         (viewSystem level.width level.height level.system)
+
+
+
+-- HELPER
+
+
+icon : String -> Element msg
+icon name =
+    Element.html <|
+        Html.i
+            [ Attributes.class "fas"
+            , Attributes.class ("fa-" ++ name)
+            , Attributes.style "text-align" "center"
+            , Attributes.style "margin" "auto"
+            ]
+            []
 
 
 
