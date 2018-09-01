@@ -41,6 +41,8 @@ type alias Store =
     , player : Dict Id Player
     , enemy : Dict Id Enemy
     , spawner : Dict Id Spawner
+    , mine : Dict Id Mine
+    , trapper : Dict Id Trapper
     }
 
 
@@ -102,6 +104,31 @@ withSpawner =
         }
 
 
+type Mine
+    = Mine
+
+
+withMine : Focus Store Mine
+withMine =
+    Ecs.focus
+        { get = .mine
+        , set = \value store -> { store | mine = value }
+        }
+
+
+type alias Trapper =
+    { left : Int
+    }
+
+
+withTrapper : Focus Store Trapper
+withTrapper =
+    Ecs.focus
+        { get = .trapper
+        , set = \value store -> { store | trapper = value }
+        }
+
+
 
 ---- MODEL
 
@@ -123,6 +150,8 @@ init _ =
             , player = Dict.empty
             , enemy = Dict.empty
             , spawner = Dict.empty
+            , mine = Dict.empty
+            , trapper = Dict.empty
             }
                 |> Ecs.spawnEntity
                     (\newId ->
@@ -135,6 +164,8 @@ init _ =
                 |> spawnSpawner (width - 1) 0 6
                 |> spawnSpawner (width - 1) (height - 1) 4
                 |> spawnSpawner 0 (height - 1) 2
+                |> spawnMine { x = 5, y = 5 }
+                |> spawnTrapper 8 5 8
       }
     , Cmd.none
     )
@@ -154,6 +185,24 @@ spawnSpawner x y left =
     Ecs.spawnEntity
         (\newId ->
             Ecs.setComponent withSpawner newId { left = left }
+                >> Ecs.setComponent withPosition newId { x = x, y = y }
+        )
+
+
+spawnMine : Position -> System Store -> System Store
+spawnMine { x, y } =
+    Ecs.spawnEntity
+        (\newId ->
+            Ecs.setComponent withMine newId Mine
+                >> Ecs.setComponent withPosition newId { x = x, y = y }
+        )
+
+
+spawnTrapper : Int -> Int -> Int -> System Store -> System Store
+spawnTrapper x y left =
+    Ecs.spawnEntity
+        (\newId ->
+            Ecs.setComponent withTrapper newId { left = left }
                 >> Ecs.setComponent withPosition newId { x = x, y = y }
         )
 
@@ -200,66 +249,96 @@ viewRow system rowIndex =
 viewField : System Store -> Int -> Int -> Element Msg
 viewField system rowIndex columnIndex =
     let
+        redTiles =
+            List.concat
+                [ redEnemyTiles
+                , mineTiles
+                ]
+
         enemies =
-            Ecs.with2 withPosition withEnemy system
-                |> List.map Tuple.second
+            Ecs.with2 withEnemy withPosition system
+
+        greenEnemyTiles =
+            enemies
+                |> List.filterMap
+                    (\( _, ( { side }, position ) ) ->
+                        case side of
+                            Red ->
+                                Just position
+
+                            Green ->
+                                Nothing
+                    )
+
+        redEnemyTiles =
+            enemies
+                |> List.filterMap
+                    (\( _, ( { side }, position ) ) ->
+                        case side of
+                            Red ->
+                                Just position
+
+                            Green ->
+                                Nothing
+                    )
+
+        lightRedTiles =
+            redEnemyTiles
+                |> List.concatMap
+                    (\{ x, y } ->
+                        [ { x = x - 1, y = y }
+                        , { x = x - 1, y = y + 1 }
+                        , { x = x, y = y + 1 }
+                        , { x = x + 1, y = y + 1 }
+                        , { x = x + 1, y = y }
+                        , { x = x + 1, y = y - 1 }
+                        , { x = x, y = y - 1 }
+                        , { x = x - 1, y = y - 1 }
+                        ]
+                    )
+
+        greenTiles =
+            List.concat
+                [ Ecs.with2 withEnemy withPosition system
+                    |> List.filterMap
+                        (\( _, ( { side }, position ) ) ->
+                            case side of
+                                Red ->
+                                    Nothing
+
+                                Green ->
+                                    Just position
+                        )
+                , playerTiles
+                , trapperTiles
+                , greenEnemyTiles
+                ]
+
+        playerTiles =
+            Ecs.with2 withPlayer withPosition system
+                |> List.map (Tuple.second >> Tuple.second)
+
+        trapperTiles =
+            Ecs.with2 withTrapper withPosition system
+                |> List.map (Tuple.second >> Tuple.second)
+
+        mineTiles =
+            Ecs.with2 withMine withPosition system
+                |> List.map (Tuple.second >> Tuple.second)
 
         backgroundColor =
-            case housesEnemy of
-                Nothing ->
-                    if housesPlayer then
-                        Element.rgb 0 1 0
-                    else
-                        case nextToEnemy of
-                            Nothing ->
-                                Element.rgb 1 1 1
-
-                            Just Red ->
-                                Element.rgb 1 0.5 0.5
-
-                            Just Green ->
-                                Element.rgb 0.5 1 0.5
-
-                Just Red ->
-                    Element.rgb 1 0 0
-
-                Just Green ->
-                    Element.rgb 0 1 0
-
-        housesPlayer =
-            Ecs.with2 withPlayer withPosition system
-                |> List.head
-                |> Maybe.map
-                    (\( _, ( _, playerPosition ) ) ->
-                        (rowIndex == playerPosition.y)
-                            && (columnIndex == playerPosition.x)
-                    )
-                |> Maybe.withDefault False
-
-        housesEnemy =
-            enemies
-                |> List.filterMap
-                    (\( enemyPosition, enemy ) ->
-                        if
-                            (enemyPosition.x == columnIndex)
-                                && (enemyPosition.y == rowIndex)
-                        then
-                            Just enemy.side
-                        else
-                            Nothing
-                    )
-                |> List.head
-
-        nextToEnemy =
-            enemies
-                |> List.filterMap
-                    (\( enemyPosition, enemy ) ->
-                        if controlledByEnemy columnIndex rowIndex ( enemyPosition, enemy ) then
-                            Just enemy.side
-                        else
-                            Nothing
-                    )
-                |> List.head
+            let
+                tilePosition =
+                    { x = columnIndex, y = rowIndex }
+            in
+            if List.member tilePosition redTiles then
+                Element.rgb 1 0 0
+            else if List.member tilePosition greenTiles then
+                Element.rgb 0 1 0
+            else if List.member tilePosition lightRedTiles then
+                Element.rgb 1 0.5 0.5
+            else
+                Element.rgb 1 1 1
     in
     Element.el
         [ Element.width Element.fill
@@ -310,16 +389,13 @@ update msg model =
 
 step : Int -> Int -> System Store -> System Store
 step deltaX deltaY system =
-    let
-        enemyIds =
-            Ecs.having2 withPosition withEnemy system
-    in
     system
         |> movePlayer deltaX deltaY
         |> Maybe.map
             (fightEnemies
-                >> moveEnemies enemyIds
-                >> switchEnemiesTeam enemyIds
+                >> moveEnemies
+                >> moveTrappers
+                >> switchEnemiesTeam
                 >> stepSpawners
             )
         |> Maybe.withDefault system
@@ -415,33 +491,24 @@ fightEnemy id system =
 -- STEP ENEMIES POSITION
 
 
-moveEnemies : List Id -> System Store -> System Store
-moveEnemies ids system =
-    List.foldl moveEnemy system ids
+moveEnemies : System Store -> System Store
+moveEnemies system =
+    List.foldl moveEnemy system (Ecs.with2 withEnemy withPosition system)
 
 
-moveEnemy : Id -> System Store -> System Store
-moveEnemy id system =
+moveEnemy : ( Id, ( Enemy, Position ) ) -> System Store -> System Store
+moveEnemy ( id, ( enemy, enemyPosition ) ) system =
     let
-        otherEnemies =
-            Ecs.with2 withPosition withEnemy system
-                |> List.filter (Tuple.first >> (/=) id)
-
-        enemyPosition =
-            Ecs.getComponent withPosition id system
-
-        enemy =
-            Ecs.getComponent withEnemy id system
+        obstacles =
+            getObstacles id system
 
         playerPosition =
             Ecs.with2 withPlayer withPosition system
                 |> List.head
                 |> Maybe.map (Tuple.second >> Tuple.second)
     in
-    Maybe.map3 (moveEnemyHelp otherEnemies)
+    Maybe.map (moveEnemyHelp obstacles enemyPosition)
         playerPosition
-        enemyPosition
-        enemy
         |> Maybe.map
             (\newPosition ->
                 Ecs.setComponent withPosition id newPosition system
@@ -450,12 +517,11 @@ moveEnemy id system =
 
 
 moveEnemyHelp :
-    List ( Id, ( Position, Enemy ) )
+    List Position
     -> Position
     -> Position
-    -> Enemy
     -> Position
-moveEnemyHelp otherEnemies playerPosition enemyPosition enemy =
+moveEnemyHelp obstacles enemyPosition playerPosition =
     let
         deltaX =
             playerPosition.x - enemyPosition.x
@@ -478,12 +544,7 @@ moveEnemyHelp otherEnemies playerPosition enemyPosition enemy =
             else
                 enemyPosition
     in
-    if
-        List.any (controlledByEnemy newEnemyPosition.x newEnemyPosition.y)
-            (List.map Tuple.second otherEnemies)
-    then
-        enemyPosition
-    else if (newEnemyPosition.x == playerPosition.x) && (newEnemyPosition.y == playerPosition.y) then
+    if List.member newEnemyPosition obstacles then
         enemyPosition
     else
         newEnemyPosition
@@ -503,12 +564,107 @@ controlledByEnemy x y ( enemyPosition, enemy ) =
 
 
 
+-- STEP TRAPPER POSITION
+
+
+{-| Obstacles for enemy movement.
+-}
+getObstacles : Id -> System Store -> List Position
+getObstacles id system =
+    let
+        filter ( otherId, ( _, position ) ) =
+            if otherId /= id then
+                Just position
+            else
+                Nothing
+    in
+    List.concat
+        [ Ecs.with2 withEnemy withPosition system
+            |> List.filterMap filter
+        , Ecs.with2 withTrapper withPosition system
+            |> List.filterMap filter
+        , Ecs.with2 withMine withPosition system
+            |> List.filterMap filter
+        , Ecs.with2 withPlayer withPosition system
+            |> List.filterMap filter
+        ]
+
+
+moveTrappers : System Store -> System Store
+moveTrappers system =
+    List.foldl moveTrapper system (Ecs.with2 withTrapper withPosition system)
+
+
+moveTrapper : ( Id, ( Trapper, Position ) ) -> System Store -> System Store
+moveTrapper ( id, ( trapper, trapperPosition ) ) system =
+    let
+        obstacles =
+            getObstacles id system
+
+        playerPosition =
+            Ecs.with2 withPlayer withPosition system
+                |> List.head
+                |> Maybe.map (Tuple.second >> Tuple.second)
+    in
+    Maybe.map (moveTrapperHelp obstacles trapperPosition)
+        playerPosition
+        |> Maybe.map
+            (\newPosition ->
+                system
+                    |> Ecs.setComponent withPosition id newPosition
+                    |> (if trapper.left > 0 then
+                            Ecs.setComponent withTrapper
+                                id
+                                { trapper | left = trapper.left - 1 }
+                        else
+                            Ecs.setComponent withTrapper id { trapper | left = 8 }
+                                >> spawnMine trapperPosition
+                       )
+            )
+        |> Maybe.withDefault system
+
+
+moveTrapperHelp :
+    List Position
+    -> Position
+    -> Position
+    -> Position
+moveTrapperHelp obstacles trapperPosition playerPosition =
+    let
+        deltaX =
+            playerPosition.x - trapperPosition.x
+
+        deltaY =
+            playerPosition.y - trapperPosition.y
+
+        newTrapperPosition =
+            if abs deltaX >= abs deltaY then
+                if deltaX > 0 then
+                    { trapperPosition | x = clamp 0 (width - 1) (trapperPosition.x + 1) }
+                else if deltaX < 0 then
+                    { trapperPosition | x = clamp 0 (width - 1) (trapperPosition.x - 1) }
+                else
+                    trapperPosition
+            else if deltaY > 0 then
+                { trapperPosition | y = clamp 0 (height - 1) (trapperPosition.y + 1) }
+            else if deltaY < 0 then
+                { trapperPosition | y = clamp 0 (height - 1) (trapperPosition.y - 1) }
+            else
+                trapperPosition
+    in
+    if List.member newTrapperPosition obstacles then
+        trapperPosition
+    else
+        newTrapperPosition
+
+
+
 -- STEP ENEMIES TEAM
 
 
-switchEnemiesTeam : List Id -> System Store -> System Store
-switchEnemiesTeam ids system =
-    List.foldl switchEnemyTeam system ids
+switchEnemiesTeam : System Store -> System Store
+switchEnemiesTeam system =
+    List.foldl switchEnemyTeam system (Ecs.having2 withPosition withEnemy system)
 
 
 switchEnemyTeam : Id -> System Store -> System Store
