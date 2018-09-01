@@ -118,31 +118,44 @@ init _ =
     ( { leftUntilSpawn = 8
       , corner = 3
       , system =
-            { nextId = 4
-            , position =
-                Dict.fromList
-                    [ ( 0, { x = 10, y = 6 } )
-                    , ( 1, { x = 0, y = 0 } )
-                    , ( 2, { x = 2, y = 5 } )
-                    , ( 3, { x = 0, y = 0 } )
-                    ]
-            , player =
-                Dict.fromList
-                    [ ( 0, Player )
-                    ]
-            , enemy =
-                Dict.fromList
-                    [ ( 1, { left = 3, side = Red } )
-                    , ( 2, { left = 1, side = Red } )
-                    ]
-            , spawner =
-                Dict.fromList
-                    [ ( 3, { left = 8 } )
-                    ]
+            { nextId = 0
+            , position = Dict.empty
+            , player = Dict.empty
+            , enemy = Dict.empty
+            , spawner = Dict.empty
             }
+                |> Ecs.spawnEntity
+                    (\newId ->
+                        Ecs.setComponent withPlayer newId Player
+                            >> Ecs.setComponent withPosition newId { x = 10, y = 6 }
+                    )
+                |> spawnEnemy 0 0 3 Red
+                |> spawnEnemy 2 5 1 Red
+                |> spawnSpawner 0 0 8
+                |> spawnSpawner (width - 1) 0 6
+                |> spawnSpawner (width - 1) (height - 1) 4
+                |> spawnSpawner 0 (height - 1) 2
       }
     , Cmd.none
     )
+
+
+spawnEnemy : Int -> Int -> Int -> Side -> System Store -> System Store
+spawnEnemy x y left side =
+    Ecs.spawnEntity
+        (\newId ->
+            Ecs.setComponent withEnemy newId { left = left, side = side }
+                >> Ecs.setComponent withPosition newId { x = x, y = y }
+        )
+
+
+spawnSpawner : Int -> Int -> Int -> System Store -> System Store
+spawnSpawner x y left =
+    Ecs.spawnEntity
+        (\newId ->
+            Ecs.setComponent withSpawner newId { left = left }
+                >> Ecs.setComponent withPosition newId { x = x, y = y }
+        )
 
 
 
@@ -307,7 +320,7 @@ step deltaX deltaY system =
             (fightEnemies
                 >> moveEnemies enemyIds
                 >> switchEnemiesTeam enemyIds
-                >> spawnEnemies
+                >> stepSpawners
             )
         |> Maybe.withDefault system
 
@@ -534,17 +547,17 @@ switchEnemyTeam id system =
 -- STEP SPAWNING
 
 
-spawnEnemies : System Store -> System Store
-spawnEnemies system =
+stepSpawners : System Store -> System Store
+stepSpawners system =
     let
         spawners =
             Ecs.having withSpawner system
     in
-    List.foldl spawnEnemy system spawners
+    List.foldl stepSpawner system spawners
 
 
-spawnEnemy : Id -> System Store -> System Store
-spawnEnemy id system =
+stepSpawner : Id -> System Store -> System Store
+stepSpawner id system =
     Maybe.map2
         (\spawner spawnerPosition ->
             if spawner.left > 0 then
@@ -556,7 +569,7 @@ spawnEnemy id system =
                 system
                     |> Ecs.setComponent withSpawner
                         id
-                        { spawner | left = 25 }
+                        { spawner | left = 8 }
                     |> Ecs.spawnEntity
                         (\newId ->
                             Ecs.setComponent withEnemy newId { left = 3, side = Red }
