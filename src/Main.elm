@@ -201,16 +201,16 @@ spriteIcon : Sprite -> String
 spriteIcon sprite =
     case sprite of
         SwitcherSprite ->
-            "chess-pawn"
+            "dove"
 
         TrapperSprite ->
-            "chess-bishop"
+            "kiwi-bird"
 
         ChessRookSprite ->
             "chess-rook"
 
         PlayerSprite ->
-            "chess-queen"
+            "frog"
 
 
 spriteForegroundColor : Sprite -> Element.Color
