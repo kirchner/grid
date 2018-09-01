@@ -53,6 +53,11 @@ type alias Position =
     }
 
 
+positionFromTuple : ( Int, Int ) -> Position
+positionFromTuple ( x, y ) =
+    { x = x, y = y }
+
+
 withPosition : Focus Store Position
 withPosition =
     Ecs.focus
@@ -164,8 +169,8 @@ init _ =
                     )
                 |> spawnSpawner (spawnEnemy 3 Red) 0 0 32 2
                 |> spawnSpawner (spawnEnemy 1 Red) (width - 1) (height - 1) 32 6
-                |> spawnSpawner (spawnTrapper 8) 0 (height - 1) 32 10
-                |> spawnSpawner (spawnTrapper 8) (width - 1) 0 32 14
+                |> spawnSpawner (spawnTrapper 8) 0 (height - 1) 32 8
+                |> spawnSpawner (spawnTrapper 8) (width - 1) 0 32 10
       }
     , Cmd.none
     )
@@ -258,21 +263,44 @@ viewGrid system =
             }
 
         pathTiles =
-            redTiles
-                |> List.filterMap
-                    (\redTile ->
-                        Ecs.with2 withPlayer withPosition system
-                            |> List.head
-                            |> Maybe.map (Tuple.second >> Tuple.second)
-                            |> Maybe.andThen
-                                (\playerPosition ->
-                                    AStar.compute aStarConfig
-                                        ( redTile.x, redTile.y )
-                                        ( playerPosition.x, playerPosition.y )
-                                )
-                            |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
-                    )
-                |> List.concat
+            List.concat
+                [ enemies
+                    |> List.filterMap
+                        (\( enemyId, ( _, enemyPosition ) ) ->
+                            Ecs.with2 withPlayer withPosition system
+                                |> List.head
+                                |> Maybe.andThen
+                                    (\( playerId, ( _, playerPosition ) ) ->
+                                        let
+                                            obstacles =
+                                                getObstacles enemyId system
+                                        in
+                                        AStar.compute (aStarConfig obstacles)
+                                            ( enemyPosition.x, enemyPosition.y )
+                                            ( playerPosition.x, playerPosition.y )
+                                    )
+                                |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
+                        )
+                    |> List.concat
+                , trappers
+                    |> List.filterMap
+                        (\( trapperId, ( _, trapperPosition ) ) ->
+                            Ecs.with2 withPlayer withPosition system
+                                |> List.head
+                                |> Maybe.andThen
+                                    (\( playerId, ( _, playerPosition ) ) ->
+                                        let
+                                            obstacles =
+                                                getObstacles trapperId system
+                                        in
+                                        AStar.compute (aStarConfig obstacles)
+                                            ( trapperPosition.x, trapperPosition.y )
+                                            ( playerPosition.x, playerPosition.y )
+                                    )
+                                |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
+                        )
+                    |> List.concat
+                ]
 
         redTiles =
             List.concat
@@ -344,8 +372,11 @@ viewGrid system =
                 |> List.map (Tuple.second >> Tuple.second)
 
         trapperTiles =
-            Ecs.with2 withTrapper withPosition system
+            trappers
                 |> List.map (Tuple.second >> Tuple.second)
+
+        trappers =
+            Ecs.with2 withTrapper withPosition system
 
         mineTiles =
             Ecs.with2 withMine withPosition system
@@ -598,28 +629,19 @@ walkTo :
     -> Position
 walkTo obstacles enemyPosition playerPosition =
     let
-        deltaX =
-            playerPosition.x - enemyPosition.x
-
-        deltaY =
-            playerPosition.y - enemyPosition.y
-
         maybeNewEnemyPosition =
-            AStar.compute aStarConfig
+            AStar.compute (aStarConfig obstacles)
                 ( enemyPosition.x, enemyPosition.y )
                 ( playerPosition.x, playerPosition.y )
                 |> Maybe.andThen (List.drop 1 >> List.head)
                 |> Maybe.map positionFromTuple
-
-        positionFromTuple ( x, y ) =
-            { x = x, y = y }
     in
     case maybeNewEnemyPosition of
         Nothing ->
             enemyPosition
 
         Just newEnemyPosition ->
-            if List.member newEnemyPosition obstacles then
+            if List.member newEnemyPosition obstacles || newEnemyPosition == playerPosition then
                 enemyPosition
             else
                 newEnemyPosition
@@ -638,8 +660,8 @@ controlledByEnemy x y ( enemyPosition, enemy ) =
             False
 
 
-aStarConfig : AStar.Config
-aStarConfig =
+aStarConfig : List Position -> AStar.Config
+aStarConfig obstacles =
     { heuristicCostEstimate =
         \goal current ->
             toFloat <|
@@ -648,18 +670,22 @@ aStarConfig =
     , neighbours =
         \( x, y ) ->
             let
-                outOfBounds ( neighbourX, neighbourY ) =
-                    (neighbourX < 0)
-                        || (neighbourX > width)
-                        || (neighbourY < 0)
-                        || (neighbourY > height)
+                inBounds ( neighbourX, neighbourY ) =
+                    (neighbourX >= 0)
+                        && (neighbourX <= width)
+                        && (neighbourY >= 0)
+                        && (neighbourY <= height)
+
+                isFree neighbour =
+                    not (List.member (positionFromTuple neighbour) obstacles)
             in
-            List.filter (not << outOfBounds)
-                [ ( x, y + 1 )
-                , ( x - 1, y )
-                , ( x + 1, y )
-                , ( x, y - 1 )
-                ]
+            List.filter isFree <|
+                List.filter inBounds
+                    [ ( x, y + 1 )
+                    , ( x - 1, y )
+                    , ( x + 1, y )
+                    , ( x, y - 1 )
+                    ]
     }
 
 
@@ -684,8 +710,6 @@ getObstacles id system =
         , Ecs.with2 withTrapper withPosition system
             |> List.filterMap filter
         , Ecs.with2 withMine withPosition system
-            |> List.filterMap filter
-        , Ecs.with2 withPlayer withPosition system
             |> List.filterMap filter
         ]
 
