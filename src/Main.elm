@@ -220,9 +220,15 @@ spriteForegroundColor sprite =
 
 type Model
     = Welcome
-    | InLevel Int Int Level
+    | Playing PlayingData
     | GameWon Int
     | GameOver Int Level
+
+
+type alias PlayingData =
+    { score : Int
+    , remainingLevels : List Level
+    }
 
 
 init : {} -> ( Model, Cmd Msg )
@@ -235,7 +241,8 @@ init _ =
 
 
 type alias Level =
-    { width : Int
+    { name : String
+    , width : Int
     , height : Int
     , system : System Store
     , info : String
@@ -264,6 +271,13 @@ emptySystem =
     }
 
 
+allLevels : List Level
+allLevels =
+    [ level0
+    , level1
+    ]
+
+
 level0 : Level
 level0 =
     let
@@ -273,7 +287,8 @@ level0 =
         height =
             6
     in
-    { width = width
+    { name = "Level #0"
+    , width = width
     , height = height
     , system =
         emptySystem
@@ -293,7 +308,8 @@ level1 =
         height =
             9
     in
-    { width = width
+    { name = "Level #1"
+    , width = width
     , height = height
     , system =
         emptySystem
@@ -455,8 +471,10 @@ view model =
                 Welcome ->
                     viewWelcome
 
-                InLevel score name system ->
-                    viewLevel score name system
+                Playing data ->
+                    List.head data.remainingLevels
+                        |> Maybe.map (viewLevel data.score)
+                        |> Maybe.withDefault Element.none
 
                 GameWon score ->
                     viewGameWon score
@@ -502,8 +520,8 @@ viewWelcome =
 -- IN LEVEL
 
 
-viewLevel : Int -> Int -> Level -> Element Msg
-viewLevel score name { width, height, system, info } =
+viewLevel : Int -> Level -> Element Msg
+viewLevel score { name, width, height, system, info } =
     Element.column
         [ Element.centerX
         , Element.centerY
@@ -518,8 +536,9 @@ viewLevel score name { width, height, system, info } =
             , Element.el
                 [ Element.alignRight
                 , Element.padding 5
+                , Font.italic
                 ]
-                (Element.text ("Level #" ++ String.fromInt name))
+                (Element.text name)
             ]
         , viewSystem width height system
         , Element.el
@@ -759,67 +778,83 @@ update msg model =
         Welcome ->
             case msg of
                 StartClicked ->
-                    ( InLevel 0 0 level0, Cmd.none )
+                    ( Playing
+                        { score = 0
+                        , remainingLevels = allLevels
+                        }
+                    , Cmd.none
+                    )
 
                 _ ->
                     ( model, Cmd.none )
 
-        InLevel score name level ->
-            let
-                handleArrowPressed deltaX deltaY =
+        Playing { score, remainingLevels } ->
+            case remainingLevels of
+                [] ->
+                    ( model, Cmd.none )
+
+                level :: rest ->
                     let
-                        newSystem =
-                            step level.width level.height deltaX deltaY level.system
+                        handleArrowPressed deltaX deltaY =
+                            let
+                                newSystem =
+                                    step level.width level.height deltaX deltaY level.system
 
-                        newLevel =
-                            { level | system = newSystem }
+                                newLevel =
+                                    { level | system = newSystem }
+                            in
+                            case level.isFinished newSystem of
+                                Running ->
+                                    ( Playing
+                                        { score = score
+                                        , remainingLevels = newLevel :: rest
+                                        }
+                                    , Cmd.none
+                                    )
+
+                                Lost levelScore ->
+                                    ( GameOver (score + levelScore) newLevel
+                                    , Cmd.none
+                                    )
+
+                                Won levelScore ->
+                                    case rest of
+                                        [] ->
+                                            ( GameWon (score + levelScore)
+                                            , Cmd.none
+                                            )
+
+                                        _ ->
+                                            ( Playing
+                                                { score = score + levelScore
+                                                , remainingLevels = rest
+                                                }
+                                            , Cmd.none
+                                            )
                     in
-                    case level.isFinished newSystem of
-                        Running ->
-                            ( InLevel score name newLevel
-                            , Cmd.none
-                            )
+                    case msg of
+                        ArrowUpPressed ->
+                            handleArrowPressed 0 -1
 
-                        Lost levelScore ->
-                            ( GameOver (score + levelScore) newLevel
-                            , Cmd.none
-                            )
+                        ArrowDownPressed ->
+                            handleArrowPressed 0 1
 
-                        Won levelScore ->
-                            case name of
-                                0 ->
-                                    ( InLevel (score + levelScore) 1 level1
-                                    , Cmd.none
-                                    )
+                        ArrowLeftPressed ->
+                            handleArrowPressed -1 0
 
-                                1 ->
-                                    ( GameWon (score + levelScore)
-                                    , Cmd.none
-                                    )
+                        ArrowRightPressed ->
+                            handleArrowPressed 1 0
 
-                                _ ->
-                                    ( model, Cmd.none )
-            in
-            case msg of
-                ArrowUpPressed ->
-                    handleArrowPressed 0 -1
-
-                ArrowDownPressed ->
-                    handleArrowPressed 0 1
-
-                ArrowLeftPressed ->
-                    handleArrowPressed -1 0
-
-                ArrowRightPressed ->
-                    handleArrowPressed 1 0
-
-                _ ->
-                    ( model, Cmd.none )
+                        _ ->
+                            ( model, Cmd.none )
 
         GameWon score ->
             case msg of
                 StartAgainClicked ->
-                    ( InLevel 0 0 level0
+                    ( Playing
+                        { score = 0
+                        , remainingLevels = allLevels
+                        }
                     , Cmd.none
                     )
 
@@ -829,7 +864,10 @@ update msg model =
         GameOver score _ ->
             case msg of
                 StartAgainClicked ->
-                    ( InLevel 0 0 level0
+                    ( Playing
+                        { score = 0
+                        , remainingLevels = allLevels
+                        }
                     , Cmd.none
                     )
 
