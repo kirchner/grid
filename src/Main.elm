@@ -31,6 +31,7 @@ type alias Store =
     , position : Dict Id Position
     , movement : Dict Id Movement
     , obstruction : Dict Id Obstruction
+    , control : Dict Id Control
     , player : Dict Id Player
     , enemy : Dict Id Enemy
     , spawner : Dict Id Spawner
@@ -82,6 +83,43 @@ withObstruction =
         }
 
 
+type Control
+    = EnemyControl
+    | MineControl
+    | ChessRookControl
+
+
+rasterizeControl : Int -> Int -> Control -> Position -> List Position
+rasterizeControl width height control position =
+    List.map (\{ x, y } -> { x = position.x + x, y = position.y + y }) <|
+        case control of
+            EnemyControl ->
+                [ { x = -1, y = 0 }
+                , { x = -1, y = 1 }
+                , { x = 0, y = 1 }
+                , { x = 1, y = 1 }
+                , { x = 1, y = 0 }
+                , { x = 1, y = -1 }
+                , { x = 0, y = -1 }
+                , { x = -1, y = -1 }
+                ]
+
+            MineControl ->
+                [ { x = 0, y = 0 } ]
+
+            ChessRookControl ->
+                List.map (\x -> { x = x, y = 0 }) (List.range 0 (width - 1))
+                    ++ List.map (\y -> { x = 0, y = y }) (List.range 0 (height - 1))
+
+
+withControl : Focus Store Control
+withControl =
+    Ecs.focus
+        { get = .control
+        , set = \value store -> { store | control = value }
+        }
+
+
 type Player
     = Player
 
@@ -96,7 +134,6 @@ withPlayer =
 
 type alias Enemy =
     { left : Int
-    , side : Side
     }
 
 
@@ -199,6 +236,7 @@ emptySystem =
     , trapper = Dict.empty
     , movement = Dict.empty
     , obstruction = Dict.empty
+    , control = Dict.empty
     }
 
 
@@ -216,7 +254,7 @@ level0 =
     , system =
         emptySystem
             |> spawnPlayer { x = 5, y = 5 }
-            |> spawnEnemy { x = 0, y = 0 } { left = 3, side = Red }
+            |> spawnEnemy { x = 0, y = 0 } { left = 3 }
     , info = "Press the Arrow Keys!"
     , isFinished = isFinished width height 10
     }
@@ -236,7 +274,7 @@ level1 =
     , system =
         emptySystem
             |> spawnPlayer { x = 4, y = 4 }
-            |> spawnEnemy { x = 0, y = 0 } { left = 1, side = Red }
+            |> spawnEnemy { x = 0, y = 0 } { left = 1 }
             |> spawnTrapper { x = width - 1, y = height - 1 } { left = 8 }
     , info = "Watch out!"
     , isFinished = isFinished width height 20
@@ -264,12 +302,11 @@ isFinished width height score system =
                                 |> List.filter inBounds
                                 |> List.all
                                     (\( neighbourX, neighbourY ) ->
-                                        List.any
-                                            (controlledByEnemy
-                                                neighbourX
-                                                neighbourY
-                                            )
-                                            enemies
+                                        controlledByEnemy
+                                            width
+                                            height
+                                            { x = neighbourX, y = neighbourY }
+                                            system
                                     )
                         then
                             Just True
@@ -283,10 +320,6 @@ isFinished width height score system =
                 && (neighbourX < width)
                 && (neighbourY >= 0)
                 && (neighbourY < height)
-
-        enemies =
-            Ecs.with2 withPosition withEnemy system
-                |> List.map Tuple.second
     in
     if allEnemiesGone then
         Won score
@@ -319,6 +352,7 @@ spawnEnemy position enemy =
                 >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withMovement newId Movement
+                >> Ecs.setComponent withControl newId EnemyControl
         )
 
 
@@ -342,6 +376,7 @@ spawnMine { x, y } =
                 >> Ecs.setComponent withMine newId Mine
                 >> Ecs.setComponent withPosition newId { x = x, y = y }
                 >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withControl newId MineControl
         )
 
 
@@ -520,27 +555,31 @@ viewSystem width height system =
             Ecs.with2 withEnemy withPosition system
 
         greenEnemyTiles =
-            enemies
+            Ecs.with2 withEnemy withPosition system
                 |> List.filterMap
-                    (\( _, ( { side }, position ) ) ->
-                        case side of
-                            Red ->
-                                Just position
-
-                            Green ->
-                                Nothing
+                    (\( enemyId, ( _, enemyPosition ) ) ->
+                        let
+                            hasControl =
+                                Ecs.getComponent withControl enemyId system /= Nothing
+                        in
+                        if hasControl then
+                            Nothing
+                        else
+                            Just enemyPosition
                     )
 
         redEnemyTiles =
-            enemies
+            Ecs.with2 withEnemy withPosition system
                 |> List.filterMap
-                    (\( _, ( { side }, position ) ) ->
-                        case side of
-                            Red ->
-                                Just position
-
-                            Green ->
-                                Nothing
+                    (\( enemyId, ( _, enemyPosition ) ) ->
+                        let
+                            hasControl =
+                                Ecs.getComponent withControl enemyId system /= Nothing
+                        in
+                        if hasControl then
+                            Just enemyPosition
+                        else
+                            Nothing
                     )
 
         lightRedTiles =
@@ -560,17 +599,7 @@ viewSystem width height system =
 
         greenTiles =
             List.concat
-                [ Ecs.with2 withEnemy withPosition system
-                    |> List.filterMap
-                        (\( _, ( { side }, position ) ) ->
-                            case side of
-                                Red ->
-                                    Nothing
-
-                                Green ->
-                                    Just position
-                        )
-                , playerTiles
+                [ playerTiles
                 , trapperTiles
                 , greenEnemyTiles
                 ]
@@ -811,8 +840,20 @@ update msg model =
 --- STEP
 
 
+debugStep : Bool
+debugStep =
+    False
+
+
 step : Int -> Int -> Int -> Int -> System Store -> System Store
 step width height deltaX deltaY system =
+    let
+        optionallyDebugStep newSystem =
+            if debugStep then
+                Debug.log "newSystem" newSystem
+            else
+                newSystem
+    in
     system
         |> movePlayer width height deltaX deltaY
         |> Maybe.map
@@ -823,6 +864,7 @@ step width height deltaX deltaY system =
                 >> stepSpawners
             )
         |> Maybe.withDefault system
+        |> optionallyDebugStep
 
 
 
@@ -846,19 +888,22 @@ movePlayer width height deltaX deltaY system =
                             | x = playerPosition.x + deltaX
                             , y = playerPosition.y + deltaY
                         }
+
+                    normalizedPlayerPosition =
+                        normalizePosition width height newPlayerPosition
+
+                    playerActuallyMoved =
+                        newPlayerPosition == normalizedPlayerPosition
                 in
-                if List.any (controlledByEnemy newPlayerPosition.x newPlayerPosition.y) enemies then
+                if controlledByEnemy width height newPlayerPosition system then
                     Nothing
-                else if
-                    newPlayerPosition
-                        /= normalizePosition width height newPlayerPosition
-                then
+                else if not playerActuallyMoved then
                     Nothing
                 else
                     Just <|
                         Ecs.setComponent withPosition
                             playerId
-                            (normalizePosition width height newPlayerPosition)
+                            normalizedPlayerPosition
                             system
             )
 
@@ -889,22 +934,31 @@ fightEnemies system =
 
 fightEnemy : ( Id, ( Enemy, Position ) ) -> System Store -> System Store
 fightEnemy ( id, ( enemy, enemyPosition ) ) system =
+    let
+        hasControl =
+            Ecs.getComponent withControl id system /= Nothing
+
+        -- TODO: This requires to remember possibly all associated components
+        -- to this ID..
+        removeEnemy =
+            identity
+                >> Ecs.removeComponent withEnemy id
+                >> Ecs.removeComponent withPosition id
+                >> Ecs.removeComponent withObstruction id
+                >> Ecs.removeComponent withMovement id
+                >> Ecs.removeComponent withControl id
+    in
     Maybe.map
         (\playerPosition ->
-            case enemy.side of
-                Red ->
-                    system
-
-                Green ->
-                    if
-                        (playerPosition.x == enemyPosition.x)
-                            && (playerPosition.y == enemyPosition.y)
-                    then
-                        system
-                            |> Ecs.removeComponent withPosition id
-                            |> Ecs.removeComponent withEnemy id
-                    else
-                        system
+            if hasControl then
+                system
+            else if
+                (playerPosition.x == enemyPosition.x)
+                    && (playerPosition.y == enemyPosition.y)
+            then
+                removeEnemy system
+            else
+                system
         )
         (Ecs.with2 withPlayer withPosition system
             |> List.head
@@ -997,17 +1051,17 @@ walkTo width height obstacles position playerPosition =
                 newPosition
 
 
-controlledByEnemy : Int -> Int -> ( Position, Enemy ) -> Bool
-controlledByEnemy x y ( enemyPosition, enemy ) =
-    case enemy.side of
-        Red ->
-            (enemyPosition.x >= x - 1)
-                && (enemyPosition.x <= x + 1)
-                && (enemyPosition.y >= y - 1)
-                && (enemyPosition.y <= y + 1)
-
-        Green ->
-            False
+controlledByEnemy : Int -> Int -> Position -> System Store -> Bool
+controlledByEnemy width height position system =
+    let
+        controlledPositions =
+            Ecs.with2 withControl withPosition system
+                |> List.concatMap
+                    (\( id, ( control, controlPosition ) ) ->
+                        rasterizeControl width height control controlPosition
+                    )
+    in
+    List.member position controlledPositions
 
 
 aStarConfig : Int -> Int -> List Position -> AStar.Config
@@ -1090,28 +1144,27 @@ stepEnemies system =
 stepEnemy : ( Id, Enemy ) -> System Store -> System Store
 stepEnemy ( id, enemy ) system =
     let
-        newEnemy =
-            if enemy.left > 0 then
-                { enemy | left = enemy.left - 1 }
-            else
+        hasControl =
+            Ecs.getComponent withControl id system /= Nothing
+    in
+    if enemy.left > 0 then
+        Ecs.setComponent withEnemy id { enemy | left = enemy.left - 1 } system
+    else
+        system
+            |> Ecs.setComponent withEnemy
+                id
                 { enemy
                     | left =
-                        case enemy.side of
-                            Green ->
-                                8
-
-                            Red ->
-                                2
-                    , side =
-                        case enemy.side of
-                            Green ->
-                                Red
-
-                            Red ->
-                                Green
+                        if hasControl then
+                            2
+                        else
+                            8
                 }
-    in
-    Ecs.setComponent withEnemy id newEnemy system
+            |> (if hasControl then
+                    Ecs.removeComponent withControl id
+                else
+                    Ecs.setComponent withControl id EnemyControl
+               )
 
 
 
