@@ -1,4 +1,4 @@
-module AStar exposing (Node, aStar)
+module AStar exposing (Node, compute)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
@@ -26,8 +26,8 @@ type Step
     | Impossible
 
 
-aStar : Int -> Int -> Node -> Node -> Maybe (List Node)
-aStar width height start goal =
+compute : Int -> Int -> Node -> Node -> Maybe (List Node)
+compute width height start goal =
     let
         initialState =
             { closedSet = Set.empty
@@ -74,10 +74,12 @@ iterate width height goal ({ closedSet, openSet, fScore, gScore, cameFrom } as s
     case
         openSet
             |> Set.toList
-            |> List.filterMap
+            |> List.map
                 (\node ->
-                    Dict.get node fScore
-                        |> Maybe.map (Tuple.pair node)
+                    ( node
+                    , Dict.get node fScore
+                        |> Maybe.withDefault (1 / 0)
+                    )
                 )
             |> List.sortBy Tuple.second
             |> List.head
@@ -107,12 +109,11 @@ iterate width height goal ({ closedSet, openSet, fScore, gScore, cameFrom } as s
                                 Dict.get current gScore
                                     |> Maybe.withDefault (1 / 0)
                         in
-                        if
-                            Set.member neighbour intermediateState.openSet
-                                && (tentativeGScore < neighbourGScore)
-                        then
+                        if Set.member neighbour closedSet then
+                            intermediateState
+                        else if not (Set.member neighbour intermediateState.openSet) then
                             { intermediateState
-                                | openSet = Set.insert current intermediateState.openSet
+                                | openSet = Set.insert neighbour intermediateState.openSet
                                 , cameFrom =
                                     Dict.insert neighbour
                                         current
@@ -123,17 +124,29 @@ iterate width height goal ({ closedSet, openSet, fScore, gScore, cameFrom } as s
                                         intermediateState.gScore
                                 , fScore =
                                     Dict.insert neighbour
-                                        (neighbourGScore + h goal neighbour)
+                                        (tentativeGScore + h goal neighbour)
                                         intermediateState.fScore
                             }
+                        else if tentativeGScore >= neighbourGScore then
+                            intermediateState
                         else
                             { intermediateState
-                                | openSet = Set.insert current intermediateState.openSet
+                                | cameFrom =
+                                    Dict.insert neighbour
+                                        current
+                                        intermediateState.cameFrom
+                                , gScore =
+                                    Dict.insert neighbour
+                                        tentativeGScore
+                                        intermediateState.gScore
+                                , fScore =
+                                    Dict.insert neighbour
+                                        (tentativeGScore + h goal neighbour)
+                                        intermediateState.fScore
                             }
                 in
                 Loop
                     (neighbours width height current
-                        |> List.filter notInClosed
                         |> List.foldl folder
                             { state
                                 | openSet = Set.remove current openSet
@@ -157,7 +170,7 @@ neighbours width height ( x, y ) =
                 || (neighbourY < 0)
                 || (neighbourY > height)
     in
-    List.filter outOfBounds
+    List.filter (not << outOfBounds)
         [ ( x, y + 1 )
         , ( x - 1, y )
         , ( x + 1, y )

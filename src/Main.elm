@@ -239,31 +239,42 @@ view model =
     }
 
 
+type alias Tiles =
+    { red : List Position
+    , green : List Position
+    , lightRed : List Position
+    , path : List Position
+    }
+
+
 viewGrid : System Store -> Element Msg
 viewGrid system =
-    Element.column
-        [ Element.width Element.fill
-        , Element.height Element.fill
-        ]
-        (List.range 0 (height - 1)
-            |> List.map (viewRow system)
-        )
-
-
-viewRow : System Store -> Int -> Element Msg
-viewRow system rowIndex =
-    Element.row
-        [ Element.width Element.fill
-        , Element.height Element.fill
-        ]
-        (List.range 0 (width - 1)
-            |> List.map (viewField system rowIndex)
-        )
-
-
-viewField : System Store -> Int -> Int -> Element Msg
-viewField system rowIndex columnIndex =
     let
+        tiles =
+            { red = redTiles
+            , green = greenTiles
+            , lightRed = lightRedTiles
+            , path = pathTiles
+            }
+
+        pathTiles =
+            redTiles
+                |> List.filterMap
+                    (\redTile ->
+                        Ecs.with2 withPlayer withPosition system
+                            |> List.head
+                            |> Maybe.map (Tuple.second >> Tuple.second)
+                            |> Maybe.andThen
+                                (\playerPosition ->
+                                    AStar.compute width
+                                        height
+                                        ( redTile.x, redTile.y )
+                                        ( playerPosition.x, playerPosition.y )
+                                )
+                            |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
+                    )
+                |> List.concat
+
         redTiles =
             List.concat
                 [ redEnemyTiles
@@ -340,18 +351,43 @@ viewField system rowIndex columnIndex =
         mineTiles =
             Ecs.with2 withMine withPosition system
                 |> List.map (Tuple.second >> Tuple.second)
+    in
+    Element.column
+        [ Element.width Element.fill
+        , Element.height Element.fill
+        ]
+        (List.range 0 (height - 1)
+            |> List.map (viewRow tiles system)
+        )
 
+
+viewRow : Tiles -> System Store -> Int -> Element Msg
+viewRow tiles system rowIndex =
+    Element.row
+        [ Element.width Element.fill
+        , Element.height Element.fill
+        ]
+        (List.range 0 (width - 1)
+            |> List.map (viewField tiles system rowIndex)
+        )
+
+
+viewField : Tiles -> System Store -> Int -> Int -> Element Msg
+viewField tiles system rowIndex columnIndex =
+    let
         backgroundColor =
             let
                 tilePosition =
                     { x = columnIndex, y = rowIndex }
             in
-            if List.member tilePosition redTiles then
+            if List.member tilePosition tiles.red then
                 Element.rgb 1 0 0
-            else if List.member tilePosition greenTiles then
+            else if List.member tilePosition tiles.green then
                 Element.rgb 0 1 0
-            else if List.member tilePosition lightRedTiles then
+            else if List.member tilePosition tiles.lightRed then
                 Element.rgb 1 0.5 0.5
+            else if List.member tilePosition tiles.path then
+                Element.rgb 0.5 0.5 1
             else
                 Element.rgb 1 1 1
     in
