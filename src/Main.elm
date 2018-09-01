@@ -37,7 +37,23 @@ type alias Store =
     , spawner : Dict Id Spawner
     , mine : Dict Id Mine
     , trapper : Dict Id Trapper
+    , sprite : Dict Id Sprite
     }
+
+
+removeEntity : Id -> System Store -> System Store
+removeEntity id system =
+    system
+        |> Ecs.removeComponent withPosition id
+        |> Ecs.removeComponent withMovement id
+        |> Ecs.removeComponent withObstruction id
+        |> Ecs.removeComponent withControl id
+        |> Ecs.removeComponent withPlayer id
+        |> Ecs.removeComponent withEnemy id
+        |> Ecs.removeComponent withSpawner id
+        |> Ecs.removeComponent withMine id
+        |> Ecs.removeComponent withTrapper id
+        |> Ecs.removeComponent withSprite id
 
 
 type alias Position =
@@ -86,7 +102,6 @@ withObstruction =
 type Control
     = EnemyControl
     | MineControl
-    | ChessRookControl
 
 
 rasterizeControl : Int -> Int -> Control -> Position -> List Position
@@ -102,14 +117,11 @@ rasterizeControl width height control position =
                 , { x = 1, y = -1 }
                 , { x = 0, y = -1 }
                 , { x = -1, y = -1 }
+                , { x = 0, y = 0 }
                 ]
 
             MineControl ->
                 [ { x = 0, y = 0 } ]
-
-            ChessRookControl ->
-                List.map (\x -> { x = x, y = 0 }) (List.range 0 (width - 1))
-                    ++ List.map (\y -> { x = 0, y = y }) (List.range 0 (height - 1))
 
 
 withControl : Focus Store Control
@@ -191,6 +203,19 @@ withTrapper =
         }
 
 
+type Sprite
+    = EnemySprite
+    | PlayerSprite
+
+
+withSprite : Focus Store Sprite
+withSprite =
+    Ecs.focus
+        { get = .sprite
+        , set = \value store -> { store | sprite = value }
+        }
+
+
 
 ---- MODEL
 
@@ -237,6 +262,7 @@ emptySystem =
     , movement = Dict.empty
     , obstruction = Dict.empty
     , control = Dict.empty
+    , sprite = Dict.empty
     }
 
 
@@ -339,6 +365,7 @@ spawnPlayer position system =
         (\newId ->
             Ecs.setComponent withPlayer newId Player
                 >> Ecs.setComponent withPosition newId position
+                >> Ecs.setComponent withSprite newId PlayerSprite
         )
         system
 
@@ -353,6 +380,7 @@ spawnEnemy position enemy =
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withMovement newId Movement
                 >> Ecs.setComponent withControl newId EnemyControl
+                >> Ecs.setComponent withSprite newId EnemySprite
         )
 
 
@@ -365,6 +393,7 @@ spawnTrapper position trapper =
                 >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withMovement newId Movement
+                >> Ecs.setComponent withSprite newId EnemySprite
         )
 
 
@@ -377,6 +406,7 @@ spawnMine { x, y } =
                 >> Ecs.setComponent withPosition newId { x = x, y = y }
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withControl newId MineControl
+                >> Ecs.setComponent withSprite newId EnemySprite
         )
 
 
@@ -501,13 +531,13 @@ viewSystem width height system =
         tiles =
             { red = redTiles
             , green = greenTiles
-            , lightRed = lightRedTiles
+            , lightRed = controlledTiles
             , path = pathTiles
             }
 
         pathTiles =
             List.concat
-                [ enemies
+                [ Ecs.with2 withEnemy withPosition system
                     |> List.filterMap
                         (\( enemyId, ( _, enemyPosition ) ) ->
                             Ecs.with2 withPlayer withPosition system
@@ -546,55 +576,43 @@ viewSystem width height system =
                 ]
 
         redTiles =
-            List.concat
-                [ redEnemyTiles
-                , mineTiles
-                ]
-
-        enemies =
-            Ecs.with2 withEnemy withPosition system
-
-        greenEnemyTiles =
-            Ecs.with2 withEnemy withPosition system
-                |> List.filterMap
-                    (\( enemyId, ( _, enemyPosition ) ) ->
-                        let
-                            hasControl =
-                                Ecs.getComponent withControl enemyId system /= Nothing
-                        in
-                        if hasControl then
-                            Nothing
-                        else
-                            Just enemyPosition
-                    )
+            redEnemyTiles
 
         redEnemyTiles =
-            Ecs.with2 withEnemy withPosition system
+            Ecs.with2 withSprite withPosition system
                 |> List.filterMap
-                    (\( enemyId, ( _, enemyPosition ) ) ->
-                        let
-                            hasControl =
-                                Ecs.getComponent withControl enemyId system /= Nothing
-                        in
-                        if hasControl then
-                            Just enemyPosition
-                        else
-                            Nothing
+                    (\( spriteId, ( sprite, enemyPosition ) ) ->
+                        case sprite of
+                            EnemySprite ->
+                                if List.member enemyPosition controlledTiles then
+                                    Just enemyPosition
+                                else
+                                    Nothing
+
+                            _ ->
+                                Nothing
                     )
 
-        lightRedTiles =
-            redEnemyTiles
+        greenEnemyTiles =
+            Ecs.with2 withSprite withPosition system
+                |> List.filterMap
+                    (\( spriteId, ( sprite, enemyPosition ) ) ->
+                        case sprite of
+                            EnemySprite ->
+                                if List.member enemyPosition controlledTiles then
+                                    Nothing
+                                else
+                                    Just enemyPosition
+
+                            _ ->
+                                Nothing
+                    )
+
+        controlledTiles =
+            Ecs.with2 withControl withPosition system
                 |> List.concatMap
-                    (\{ x, y } ->
-                        [ { x = x - 1, y = y }
-                        , { x = x - 1, y = y + 1 }
-                        , { x = x, y = y + 1 }
-                        , { x = x + 1, y = y + 1 }
-                        , { x = x + 1, y = y }
-                        , { x = x + 1, y = y - 1 }
-                        , { x = x, y = y - 1 }
-                        , { x = x - 1, y = y - 1 }
-                        ]
+                    (\( controlId, ( control, position ) ) ->
+                        rasterizeControl width height control position
                     )
 
         greenTiles =
@@ -937,16 +955,6 @@ fightEnemy ( id, ( enemy, enemyPosition ) ) system =
     let
         hasControl =
             Ecs.getComponent withControl id system /= Nothing
-
-        -- TODO: This requires to remember possibly all associated components
-        -- to this ID..
-        removeEnemy =
-            identity
-                >> Ecs.removeComponent withEnemy id
-                >> Ecs.removeComponent withPosition id
-                >> Ecs.removeComponent withObstruction id
-                >> Ecs.removeComponent withMovement id
-                >> Ecs.removeComponent withControl id
     in
     Maybe.map
         (\playerPosition ->
@@ -956,7 +964,7 @@ fightEnemy ( id, ( enemy, enemyPosition ) ) system =
                 (playerPosition.x == enemyPosition.x)
                     && (playerPosition.y == enemyPosition.y)
             then
-                removeEnemy system
+                removeEntity id system
             else
                 system
         )
