@@ -392,7 +392,7 @@ step deltaX deltaY system =
     system
         |> movePlayer deltaX deltaY
         |> Maybe.map
-            (fightEnemies
+            (fight
                 >> moveEnemies
                 >> moveTrappers
                 >> switchEnemiesTeam
@@ -448,20 +448,23 @@ normalizePosition position =
 -- STEP HIT ENEMIES
 
 
+fight : System Store -> System Store
+fight system =
+    system
+        |> fightEnemies
+        |> fightTrappers
+
+
 fightEnemies : System Store -> System Store
 fightEnemies system =
-    let
-        enemyIds =
-            Ecs.having withEnemy system
-    in
-    List.foldl fightEnemy system enemyIds
+    List.foldl fightEnemy system (Ecs.with2 withEnemy withPosition system)
 
 
-fightEnemy : Id -> System Store -> System Store
-fightEnemy id system =
-    Maybe.map2
-        (\playerPosition ( enemyPosition, { side } ) ->
-            case side of
+fightEnemy : ( Id, ( Enemy, Position ) ) -> System Store -> System Store
+fightEnemy ( id, ( enemy, enemyPosition ) ) system =
+    Maybe.map
+        (\playerPosition ->
+            case enemy.side of
                 Red ->
                     system
 
@@ -480,9 +483,31 @@ fightEnemy id system =
             |> List.head
             |> Maybe.map (Tuple.second >> Tuple.second)
         )
-        (Maybe.map2 Tuple.pair
-            (Ecs.getComponent withPosition id system)
-            (Ecs.getComponent withEnemy id system)
+        |> Maybe.withDefault system
+
+
+fightTrappers : System Store -> System Store
+fightTrappers system =
+    List.foldl fightTrapper system (Ecs.with2 withTrapper withPosition system)
+
+
+fightTrapper : ( Id, ( Trapper, Position ) ) -> System Store -> System Store
+fightTrapper ( id, ( trapper, trapperPosition ) ) system =
+    Maybe.map
+        (\playerPosition ->
+            if
+                (playerPosition.x == trapperPosition.x)
+                    && (playerPosition.y == trapperPosition.y)
+            then
+                system
+                    |> Ecs.removeComponent withPosition id
+                    |> Ecs.removeComponent withTrapper id
+            else
+                system
+        )
+        (Ecs.with2 withPlayer withPosition system
+            |> List.head
+            |> Maybe.map (Tuple.second >> Tuple.second)
         )
         |> Maybe.withDefault system
 
