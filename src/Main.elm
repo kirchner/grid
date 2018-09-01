@@ -274,29 +274,6 @@ viewGrid system =
                     )
                 |> List.concat
 
-        aStarConfig =
-            { heuristicCostEstimate =
-                \goal current ->
-                    toFloat <|
-                        ((Tuple.first goal - Tuple.first current) ^ 2)
-                            + ((Tuple.second goal - Tuple.second current) ^ 2)
-            , neighbours =
-                \( x, y ) ->
-                    let
-                        outOfBounds ( neighbourX, neighbourY ) =
-                            (neighbourX < 0)
-                                || (neighbourX > width)
-                                || (neighbourY < 0)
-                                || (neighbourY > height)
-                    in
-                    List.filter (not << outOfBounds)
-                        [ ( x, y + 1 )
-                        , ( x - 1, y )
-                        , ( x + 1, y )
-                        , ( x, y - 1 )
-                        ]
-            }
-
         redTiles =
             List.concat
                 [ redEnemyTiles
@@ -605,7 +582,7 @@ moveEnemy ( id, ( enemy, enemyPosition ) ) system =
                 |> List.head
                 |> Maybe.map (Tuple.second >> Tuple.second)
     in
-    Maybe.map (moveEnemyHelp obstacles enemyPosition)
+    Maybe.map (walkTo obstacles enemyPosition)
         playerPosition
         |> Maybe.map
             (\newPosition ->
@@ -614,12 +591,12 @@ moveEnemy ( id, ( enemy, enemyPosition ) ) system =
         |> Maybe.withDefault system
 
 
-moveEnemyHelp :
+walkTo :
     List Position
     -> Position
     -> Position
     -> Position
-moveEnemyHelp obstacles enemyPosition playerPosition =
+walkTo obstacles enemyPosition playerPosition =
     let
         deltaX =
             playerPosition.x - enemyPosition.x
@@ -627,25 +604,25 @@ moveEnemyHelp obstacles enemyPosition playerPosition =
         deltaY =
             playerPosition.y - enemyPosition.y
 
-        newEnemyPosition =
-            if abs deltaX >= abs deltaY then
-                if deltaX > 0 then
-                    { enemyPosition | x = clamp 0 (width - 1) (enemyPosition.x + 1) }
-                else if deltaX < 0 then
-                    { enemyPosition | x = clamp 0 (width - 1) (enemyPosition.x - 1) }
-                else
-                    enemyPosition
-            else if deltaY > 0 then
-                { enemyPosition | y = clamp 0 (height - 1) (enemyPosition.y + 1) }
-            else if deltaY < 0 then
-                { enemyPosition | y = clamp 0 (height - 1) (enemyPosition.y - 1) }
-            else
-                enemyPosition
+        maybeNewEnemyPosition =
+            AStar.compute aStarConfig
+                ( enemyPosition.x, enemyPosition.y )
+                ( playerPosition.x, playerPosition.y )
+                |> Maybe.andThen (List.drop 1 >> List.head)
+                |> Maybe.map positionFromTuple
+
+        positionFromTuple ( x, y ) =
+            { x = x, y = y }
     in
-    if List.member newEnemyPosition obstacles then
-        enemyPosition
-    else
-        newEnemyPosition
+    case maybeNewEnemyPosition of
+        Nothing ->
+            enemyPosition
+
+        Just newEnemyPosition ->
+            if List.member newEnemyPosition obstacles then
+                enemyPosition
+            else
+                newEnemyPosition
 
 
 controlledByEnemy : Int -> Int -> ( Position, Enemy ) -> Bool
@@ -659,6 +636,31 @@ controlledByEnemy x y ( enemyPosition, enemy ) =
 
         Green ->
             False
+
+
+aStarConfig : AStar.Config
+aStarConfig =
+    { heuristicCostEstimate =
+        \goal current ->
+            toFloat <|
+                ((Tuple.first goal - Tuple.first current) ^ 2)
+                    + ((Tuple.second goal - Tuple.second current) ^ 2)
+    , neighbours =
+        \( x, y ) ->
+            let
+                outOfBounds ( neighbourX, neighbourY ) =
+                    (neighbourX < 0)
+                        || (neighbourX > width)
+                        || (neighbourY < 0)
+                        || (neighbourY > height)
+            in
+            List.filter (not << outOfBounds)
+                [ ( x, y + 1 )
+                , ( x - 1, y )
+                , ( x + 1, y )
+                , ( x, y - 1 )
+                ]
+    }
 
 
 
@@ -704,7 +706,7 @@ moveTrapper ( id, ( trapper, trapperPosition ) ) system =
                 |> List.head
                 |> Maybe.map (Tuple.second >> Tuple.second)
     in
-    Maybe.map (moveTrapperHelp obstacles trapperPosition)
+    Maybe.map (walkTo obstacles trapperPosition)
         playerPosition
         |> Maybe.map
             (\newPosition ->
@@ -720,40 +722,6 @@ moveTrapper ( id, ( trapper, trapperPosition ) ) system =
                        )
             )
         |> Maybe.withDefault system
-
-
-moveTrapperHelp :
-    List Position
-    -> Position
-    -> Position
-    -> Position
-moveTrapperHelp obstacles trapperPosition playerPosition =
-    let
-        deltaX =
-            playerPosition.x - trapperPosition.x
-
-        deltaY =
-            playerPosition.y - trapperPosition.y
-
-        newTrapperPosition =
-            if abs deltaX >= abs deltaY then
-                if deltaX > 0 then
-                    { trapperPosition | x = clamp 0 (width - 1) (trapperPosition.x + 1) }
-                else if deltaX < 0 then
-                    { trapperPosition | x = clamp 0 (width - 1) (trapperPosition.x - 1) }
-                else
-                    trapperPosition
-            else if deltaY > 0 then
-                { trapperPosition | y = clamp 0 (height - 1) (trapperPosition.y + 1) }
-            else if deltaY < 0 then
-                { trapperPosition | y = clamp 0 (height - 1) (trapperPosition.y - 1) }
-            else
-                trapperPosition
-    in
-    if List.member newTrapperPosition obstacles then
-        trapperPosition
-    else
-        newTrapperPosition
 
 
 
