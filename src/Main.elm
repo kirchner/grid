@@ -194,13 +194,8 @@ viewField : System Store -> Int -> Int -> Element Msg
 viewField system rowIndex columnIndex =
     let
         enemies =
-            Ecs.having2 withPosition withEnemy system
-                |> List.filterMap
-                    (\id ->
-                        Maybe.map2 Tuple.pair
-                            (Ecs.getComponent withPosition id system)
-                            (Ecs.getComponent withEnemy id system)
-                    )
+            Ecs.with2 withPosition withEnemy system
+                |> List.map Tuple.second
 
         backgroundColor =
             case housesEnemy of
@@ -225,14 +220,10 @@ viewField system rowIndex columnIndex =
                     Element.rgb 0 1 0
 
         housesPlayer =
-            Ecs.having withPlayer system
+            Ecs.with2 withPlayer withPosition system
                 |> List.head
-                |> Maybe.andThen
-                    (\id ->
-                        Ecs.getComponent withPosition id system
-                    )
                 |> Maybe.map
-                    (\playerPosition ->
+                    (\( _, ( _, playerPosition ) ) ->
                         (rowIndex == playerPosition.y)
                             && (columnIndex == playerPosition.x)
                     )
@@ -335,39 +326,30 @@ movePlayer : Int -> Int -> System Store -> Maybe (System Store)
 movePlayer deltaX deltaY system =
     let
         enemies =
-            Ecs.having2 withPosition withEnemy system
-                |> List.filterMap
-                    (\otherEnemyId ->
-                        Maybe.map2 Tuple.pair
-                            (Ecs.getComponent withPosition otherEnemyId system)
-                            (Ecs.getComponent withEnemy otherEnemyId system)
-                    )
+            Ecs.with2 withPosition withEnemy system
+                |> List.map Tuple.second
     in
-    Ecs.having withPlayer system
+    Ecs.with2 withPlayer withPosition system
         |> List.head
         |> Maybe.andThen
-            (\playerId ->
-                Ecs.getComponent withPosition playerId system
-                    |> Maybe.andThen
-                        (\playerPosition ->
-                            let
-                                newPlayerPosition =
-                                    { playerPosition
-                                        | x = playerPosition.x + deltaX
-                                        , y = playerPosition.y + deltaY
-                                    }
-                            in
-                            if List.any (controlledByEnemy newPlayerPosition.x newPlayerPosition.y) enemies then
-                                Nothing
-                            else if newPlayerPosition /= normalizePosition newPlayerPosition then
-                                Nothing
-                            else
-                                Just <|
-                                    Ecs.setComponent withPosition
-                                        playerId
-                                        (normalizePosition newPlayerPosition)
-                                        system
-                        )
+            (\( playerId, ( _, playerPosition ) ) ->
+                let
+                    newPlayerPosition =
+                        { playerPosition
+                            | x = playerPosition.x + deltaX
+                            , y = playerPosition.y + deltaY
+                        }
+                in
+                if List.any (controlledByEnemy newPlayerPosition.x newPlayerPosition.y) enemies then
+                    Nothing
+                else if newPlayerPosition /= normalizePosition newPlayerPosition then
+                    Nothing
+                else
+                    Just <|
+                        Ecs.setComponent withPosition
+                            playerId
+                            (normalizePosition newPlayerPosition)
+                            system
             )
 
 
@@ -411,12 +393,9 @@ fightEnemy id system =
                     else
                         system
         )
-        (Ecs.having withPlayer system
+        (Ecs.with2 withPlayer withPosition system
             |> List.head
-            |> Maybe.andThen
-                (\playerId ->
-                    Ecs.getComponent withPosition playerId system
-                )
+            |> Maybe.map (Tuple.second >> Tuple.second)
         )
         (Maybe.map2 Tuple.pair
             (Ecs.getComponent withPosition id system)
@@ -437,18 +416,9 @@ moveEnemies ids system =
 moveEnemy : Id -> System Store -> System Store
 moveEnemy id system =
     let
-        otherEnemyIds =
-            Ecs.having2 withPosition withEnemy system
-                |> List.filter ((/=) id)
-
         otherEnemies =
-            otherEnemyIds
-                |> List.filterMap
-                    (\otherEnemyId ->
-                        Maybe.map2 Tuple.pair
-                            (Ecs.getComponent withPosition otherEnemyId system)
-                            (Ecs.getComponent withEnemy otherEnemyId system)
-                    )
+            Ecs.with2 withPosition withEnemy system
+                |> List.filter (Tuple.first >> (/=) id)
 
         enemyPosition =
             Ecs.getComponent withPosition id system
@@ -457,12 +427,9 @@ moveEnemy id system =
             Ecs.getComponent withEnemy id system
 
         playerPosition =
-            Ecs.having withPlayer system
+            Ecs.with2 withPlayer withPosition system
                 |> List.head
-                |> Maybe.andThen
-                    (\playerId ->
-                        Ecs.getComponent withPosition playerId system
-                    )
+                |> Maybe.map (Tuple.second >> Tuple.second)
     in
     Maybe.map3 (moveEnemyHelp otherEnemies)
         playerPosition
@@ -476,7 +443,7 @@ moveEnemy id system =
 
 
 moveEnemyHelp :
-    List ( Position, Enemy )
+    List ( Id, ( Position, Enemy ) )
     -> Position
     -> Position
     -> Enemy
@@ -504,7 +471,10 @@ moveEnemyHelp otherEnemies playerPosition enemyPosition enemy =
             else
                 enemyPosition
     in
-    if List.any (controlledByEnemy newEnemyPosition.x newEnemyPosition.y) otherEnemies then
+    if
+        List.any (controlledByEnemy newEnemyPosition.x newEnemyPosition.y)
+            (List.map Tuple.second otherEnemies)
+    then
         enemyPosition
     else if (newEnemyPosition.x == playerPosition.x) && (newEnemyPosition.y == playerPosition.y) then
         enemyPosition

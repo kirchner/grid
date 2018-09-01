@@ -10,6 +10,8 @@ module Ecs.System
         , removeComponent
         , setComponent
         , spawnEntity
+        , with
+        , with2
         )
 
 import Dict exposing (Dict)
@@ -51,6 +53,16 @@ getComponent (Focus { get }) id system =
     Dict.get id (get system)
 
 
+removeComponent : Focus store component -> Id -> System store -> System store
+removeComponent (Focus { get, set }) id system =
+    set (Dict.remove id (get system)) system
+
+
+spawnEntity : (Id -> System store -> System store) -> System store -> System store
+spawnEntity f system =
+    f system.nextId { system | nextId = system.nextId + 1 }
+
+
 having : Focus store component -> System store -> List Id
 having (Focus { get }) system =
     Dict.keys (get system)
@@ -68,11 +80,22 @@ having2 focus1 focus2 system =
         |> Dict.keys
 
 
-removeComponent : Focus store component -> Id -> System store -> System store
-removeComponent (Focus { get, set }) id system =
-    set (Dict.remove id (get system)) system
+with : Focus store component -> System store -> List ( Id, component )
+with (Focus { get }) system =
+    Dict.toList (get system)
 
 
-spawnEntity : (Id -> System store -> System store) -> System store -> System store
-spawnEntity f system =
-    f system.nextId { system | nextId = system.nextId + 1 }
+with2 :
+    Focus store component1
+    -> Focus store component2
+    -> System store
+    -> List ( Id, ( component1, component2 ) )
+with2 focus1 focus2 system =
+    having2 focus1 focus2 system
+        |> List.filterMap
+            (\id ->
+                Maybe.map2 Tuple.pair
+                    (getComponent focus1 id system)
+                    (getComponent focus2 id system)
+                    |> Maybe.map (Tuple.pair id)
+            )
