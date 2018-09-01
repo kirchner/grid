@@ -305,7 +305,8 @@ level1 =
     , system =
         emptySystem
             |> spawnPlayer { x = 4, y = 4 }
-            |> spawnEnemy { x = 0, y = 0 } { left = 1 }
+            -- |> spawnEnemy { x = 0, y = 0 } { left = 1 }
+            |> spawnChessRook { x = 0, y = 0 }
             |> spawnTrapper { x = width - 1, y = height - 1 } { left = 8 }
     , info = "Watch out!"
     , isFinished = isFinished width height 20
