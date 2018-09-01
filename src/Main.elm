@@ -31,6 +31,7 @@ import Element.Input as Input
 import Html
 import Html.Attributes as Attributes
 import Json.Decode as Decode
+import Random
 
 
 main =
@@ -99,8 +100,13 @@ normalizePosition width height position =
     }
 
 
-type Movement
-    = Movement
+type alias Movement =
+    { strategy : MovementStrategy }
+
+
+type MovementStrategy
+    = Random
+    | MoveToPlayer
 
 
 type Obstruction
@@ -393,7 +399,7 @@ spawnSwitcher position switcher =
                 >> Ecs.setComponent withSwitcher newId switcher
                 >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
-                >> Ecs.setComponent withMovement newId Movement
+                >> Ecs.setComponent withMovement newId { strategy = MoveToPlayer }
                 >> Ecs.setComponent withControl newId SwitcherControl
                 >> Ecs.setComponent withSprite newId SwitcherSprite
         )
@@ -406,7 +412,7 @@ spawnChessRook position =
             identity
                 >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
-                >> Ecs.setComponent withMovement newId Movement
+                >> Ecs.setComponent withMovement newId { strategy = MoveToPlayer }
                 >> Ecs.setComponent withControl newId ChessRookControl
                 >> Ecs.setComponent withSprite newId ChessRookSprite
         )
@@ -420,7 +426,7 @@ spawnTrapper position trapper =
                 >> Ecs.setComponent withTrapper newId trapper
                 >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
-                >> Ecs.setComponent withMovement newId Movement
+                >> Ecs.setComponent withMovement newId { strategy = Random }
                 >> Ecs.setComponent withSprite newId TrapperSprite
         )
 
@@ -1056,7 +1062,7 @@ moveEntities width height system =
 
 
 moveEntity : Int -> Int -> ( Id, ( Movement, Position ) ) -> System Store -> System Store
-moveEntity width height ( id, ( _, position ) ) system =
+moveEntity width height ( id, ( movement, position ) ) system =
     let
         obstacles =
             getObstructedPositions id system
@@ -1066,13 +1072,57 @@ moveEntity width height ( id, ( _, position ) ) system =
                 |> List.head
                 |> Maybe.map (Tuple.second >> Tuple.second)
     in
-    Maybe.map (walkTo width height obstacles position)
-        playerPosition
+    playerPosition
+        |> Maybe.map
+            (case movement.strategy of
+                Random ->
+                    random width height obstacles position
+
+                MoveToPlayer ->
+                    walkTo width height obstacles position
+            )
         |> Maybe.map
             (\newPosition ->
                 Ecs.setComponent withPosition id newPosition system
             )
         |> Maybe.withDefault system
+
+
+random :
+    Int
+    -> Int
+    -> List Position
+    -> Position
+    -> Position
+    -> Position
+random width height obstacles position playerPosition =
+    let
+        newPosition =
+            normalizePosition width height <|
+                { x = position.x + deltaX
+                , y = position.y + deltaY
+                }
+
+        ( deltaX, deltaY ) =
+            Random.step
+                (Random.weighted
+                    ( 0.25, ( -1, 0 ) )
+                    [ ( 0.25, ( 1, 0 ) )
+                    , ( 0.25, ( 0, -1 ) )
+                    , ( 0.25, ( 0, 1 ) )
+                    ]
+                )
+                (Random.initialSeed
+                    (width * playerPosition.x
+                        + playerPosition.y
+                    )
+                )
+                |> Tuple.first
+    in
+    if List.member newPosition obstacles || newPosition == playerPosition then
+        position
+    else
+        newPosition
 
 
 walkTo :
@@ -1195,12 +1245,17 @@ stepSwitcher ( id, switcher ) system =
                         if hasControl then
                             2
                         else
-                            8
+                            4
                 }
             |> (if hasControl then
                     Ecs.removeComponent withControl id
                 else
                     Ecs.setComponent withControl id SwitcherControl
+               )
+            |> (if hasControl then
+                    Ecs.setComponent withMovement id { strategy = Random }
+                else
+                    Ecs.setComponent withMovement id { strategy = MoveToPlayer }
                )
 
 
