@@ -8,6 +8,8 @@ import Ecs.System as Ecs exposing (Focus, Id, System)
 import Element exposing (Element)
 import Element.Background as Background
 import Element.Border as Border
+import Element.Font as Font
+import Element.Input as Input
 import Json.Decode as Decode
 
 
@@ -18,18 +20,6 @@ main =
         , update = update
         , subscriptions = subscriptions
         }
-
-
-
----- CONSTANTS
-
-
-width =
-    32
-
-
-height =
-    16
 
 
 
@@ -142,38 +132,159 @@ withTrapper =
 ---- MODEL
 
 
-type alias Model =
-    { leftUntilSpawn : Int
-    , corner : Int
-    , system : Ecs.System Store
-    }
+type Model
+    = Welcome
+    | InLevel Int Int Level
+    | GameWon Int
+    | GameOver Int Level
 
 
 init : {} -> ( Model, Cmd Msg )
 init _ =
-    ( { leftUntilSpawn = 8
-      , corner = 3
-      , system =
-            { nextId = 0
-            , position = Dict.empty
-            , player = Dict.empty
-            , enemy = Dict.empty
-            , spawner = Dict.empty
-            , mine = Dict.empty
-            , trapper = Dict.empty
-            }
-                |> Ecs.spawnEntity
-                    (\newId ->
-                        Ecs.setComponent withPlayer newId Player
-                            >> Ecs.setComponent withPosition newId { x = 10, y = 6 }
-                    )
-                |> spawnSpawner (spawnEnemy 3 Red) 0 0 32 2
-                |> spawnSpawner (spawnEnemy 1 Red) (width - 1) (height - 1) 32 6
-                |> spawnSpawner (spawnTrapper 8) 0 (height - 1) 32 8
-                |> spawnSpawner (spawnTrapper 8) (width - 1) 0 32 10
-      }
+    ( Welcome
     , Cmd.none
     )
+
+
+
+---- LEVELS
+
+
+type alias Level =
+    { width : Int
+    , height : Int
+    , system : System Store
+    , info : String
+    , isFinished : System Store -> Finished
+    }
+
+
+type Finished
+    = Running
+    | Lost Int
+    | Won Int
+
+
+emptySystem =
+    { nextId = 0
+    , position = Dict.empty
+    , player = Dict.empty
+    , enemy = Dict.empty
+    , spawner = Dict.empty
+    , mine = Dict.empty
+    , trapper = Dict.empty
+    }
+
+
+level0 : Level
+level0 =
+    let
+        width =
+            6
+
+        height =
+            6
+    in
+    { width = width
+    , height = height
+    , system =
+        emptySystem
+            |> spawnPlayer 5 5
+            |> spawnEnemy 3 Red { x = 0, y = 0 }
+    , info = "Press the Arrow Keys!"
+    , isFinished = isFinished width height 10
+    }
+
+
+level1 : Level
+level1 =
+    let
+        width =
+            9
+
+        height =
+            9
+    in
+    { width = width
+    , height = height
+    , system =
+        emptySystem
+            |> spawnPlayer 4 4
+            |> spawnEnemy 1 Red { x = 0, y = 0 }
+            |> spawnTrapper 8 { x = width - 1, y = height - 1 }
+    , info = "Watch out!"
+    , isFinished = isFinished width height 20
+    }
+
+
+isFinished : Int -> Int -> Int -> System Store -> Finished
+isFinished width height score system =
+    let
+        allEnemiesGone =
+            List.isEmpty (Ecs.having withEnemy system)
+                && List.isEmpty (Ecs.having withTrapper system)
+
+        playerSurrounded =
+            Ecs.with2 withPlayer withPosition system
+                |> List.head
+                |> Maybe.andThen
+                    (\( _, ( _, { x, y } ) ) ->
+                        if
+                            [ ( x + 1, y )
+                            , ( x - 1, y )
+                            , ( x, y + 1 )
+                            , ( x, y - 1 )
+                            ]
+                                |> List.filter inBounds
+                                |> List.all
+                                    (\( neighbourX, neighbourY ) ->
+                                        List.any
+                                            (controlledByEnemy
+                                                neighbourX
+                                                neighbourY
+                                            )
+                                            enemies
+                                    )
+                        then
+                            Just True
+                        else
+                            Just False
+                    )
+                |> Maybe.withDefault False
+
+        inBounds ( neighbourX, neighbourY ) =
+            (neighbourX >= 0)
+                && (neighbourX < width)
+                && (neighbourY >= 0)
+                && (neighbourY < height)
+
+        enemies =
+            Ecs.with2 withPosition withEnemy system
+                |> List.map Tuple.second
+    in
+    if allEnemiesGone then
+        Won score
+    else if playerSurrounded then
+        Lost 0
+    else
+        Running
+
+
+
+---- SPAWNING
+
+
+spawnPlayer :
+    Int
+    -> Int
+    -> System Store
+    -> System Store
+spawnPlayer x y =
+    Ecs.spawnEntity
+        (\newId ->
+            Ecs.setComponent withPlayer newId Player
+                >> Ecs.setComponent withPosition newId { x = x, y = y }
+        )
 
 
 spawnSpawner :
@@ -238,10 +349,64 @@ view model =
         [ Element.layout
             [ Element.width Element.fill
             , Element.height Element.fill
+            , Font.family
+                [ Font.external
+                    { name = "Lato"
+                    , url = "https://fonts.googleapis.com/css?family=Lato"
+                    }
+                , Font.sansSerif
+                ]
+            , Font.size 32
             ]
-            (viewGrid model.system)
+            (case model of
+                Welcome ->
+                    viewWelcome
+
+                InLevel score name system ->
+                    viewLevel score name system
+
+                GameWon score ->
+                    viewGameWon score
+
+                GameOver score level ->
+                    viewGameOver score level
+            )
         ]
     }
+
+
+
+-- WELCOME
+
+
+viewWelcome : Element Msg
+viewWelcome =
+    Element.column
+        [ Element.width Element.fill
+        , Element.height Element.fill
+        , Element.spacing 25
+        ]
+        [ Element.el
+            [ Element.centerX
+            , Element.centerY
+            ]
+            (Element.text "Welcome!")
+        , Input.button
+            [ Element.centerX
+            , Element.centerY
+            , Element.padding 10
+            , Border.width 2
+            , Border.color (Element.rgb 0 0 0)
+            , Background.color (Element.rgb 0 1 0)
+            ]
+            { onPress = Just StartClicked
+            , label = Element.text "Start"
+            }
+        ]
+
+
+
+-- IN LEVEL
 
 
 type alias Tiles =
@@ -252,8 +417,34 @@ type alias Tiles =
     }
 
 
-viewGrid : System Store -> Element Msg
-viewGrid system =
+viewLevel : Int -> Int -> Level -> Element Msg
+viewLevel score name { width, height, system, info } =
+    Element.column
+        [ Element.centerX
+        , Element.centerY
+        ]
+        [ Element.row
+            [ Element.width Element.fill ]
+            [ Element.el
+                [ Element.alignLeft
+                , Element.padding 5
+                ]
+                (Element.text ("Score: " ++ String.fromInt score))
+            , Element.el
+                [ Element.alignRight
+                , Element.padding 5
+                ]
+                (Element.text ("Level #" ++ String.fromInt name))
+            ]
+        , viewSystem width height system
+        , Element.el
+            [ Element.padding 5 ]
+            (Element.text info)
+        ]
+
+
+viewSystem : Int -> Int -> System Store -> Element Msg
+viewSystem width height system =
     let
         tiles =
             { red = redTiles
@@ -275,7 +466,7 @@ viewGrid system =
                                             obstacles =
                                                 getObstacles enemyId system
                                         in
-                                        AStar.compute (aStarConfig obstacles)
+                                        AStar.compute (aStarConfig width height obstacles)
                                             ( enemyPosition.x, enemyPosition.y )
                                             ( playerPosition.x, playerPosition.y )
                                     )
@@ -293,7 +484,7 @@ viewGrid system =
                                             obstacles =
                                                 getObstacles trapperId system
                                         in
-                                        AStar.compute (aStarConfig obstacles)
+                                        AStar.compute (aStarConfig width height obstacles)
                                             ( trapperPosition.x, trapperPosition.y )
                                             ( playerPosition.x, playerPosition.y )
                                     )
@@ -383,27 +574,24 @@ viewGrid system =
                 |> List.map (Tuple.second >> Tuple.second)
     in
     Element.column
-        [ Element.width Element.fill
-        , Element.height Element.fill
+        [ Border.width 1
+        , Border.color (Element.rgb 0 0 0)
         ]
         (List.range 0 (height - 1)
-            |> List.map (viewRow tiles system)
+            |> List.map (viewRow width height tiles system)
         )
 
 
-viewRow : Tiles -> System Store -> Int -> Element Msg
-viewRow tiles system rowIndex =
-    Element.row
-        [ Element.width Element.fill
-        , Element.height Element.fill
-        ]
+viewRow : Int -> Int -> Tiles -> System Store -> Int -> Element Msg
+viewRow width height tiles system rowIndex =
+    Element.row []
         (List.range 0 (width - 1)
-            |> List.map (viewField tiles system rowIndex)
+            |> List.map (viewTile tiles system rowIndex)
         )
 
 
-viewField : Tiles -> System Store -> Int -> Int -> Element Msg
-viewField tiles system rowIndex columnIndex =
+viewTile : Tiles -> System Store -> Int -> Int -> Element Msg
+viewTile tiles system rowIndex columnIndex =
     let
         backgroundColor =
             let
@@ -422,9 +610,9 @@ viewField tiles system rowIndex columnIndex =
                 Element.rgb 1 1 1
     in
     Element.el
-        [ Element.width Element.fill
-        , Element.height Element.fill
-        , Border.width 1
+        [ Element.width (Element.px 80)
+        , Element.height (Element.px 80)
+        , Border.width 2
         , Border.color (Element.rgb 0 0 0)
         , Background.color backgroundColor
         ]
@@ -432,50 +620,188 @@ viewField tiles system rowIndex columnIndex =
 
 
 
+-- GAME WON
+
+
+viewGameWon : Int -> Element Msg
+viewGameWon score =
+    Element.column
+        [ Element.centerX
+        , Element.centerY
+        , Element.spacing 25
+        ]
+        [ Element.el
+            [ Element.centerX ]
+            (Element.text "You have won!")
+        , Element.el
+            [ Element.centerX ]
+            (Element.text ("Score: " ++ String.fromInt score))
+        , Input.button
+            [ Element.centerX
+            , Element.centerY
+            , Element.padding 10
+            , Border.width 2
+            , Border.color (Element.rgb 0 0 0)
+            , Background.color (Element.rgb 0 1 0)
+            ]
+            { onPress = Just StartAgainClicked
+            , label = Element.text "Start again"
+            }
+        ]
+
+
+
+-- GAME OVER
+
+
+viewGameOver : Int -> Level -> Element Msg
+viewGameOver score level =
+    Element.el
+        [ Element.centerX
+        , Element.centerY
+        , Element.inFront <|
+            Element.column
+                [ Element.centerX
+                , Element.centerY
+                , Element.spacing 25
+                , Element.padding 15
+                , Border.width 2
+                , Border.color (Element.rgb 0 0 0)
+                , Background.color (Element.rgb 1 1 1)
+                ]
+                [ Element.el
+                    [ Element.centerX ]
+                    (Element.text "Gameover")
+                , Element.el
+                    [ Element.centerX ]
+                    (Element.text ("Score: " ++ String.fromInt score))
+                , Input.button
+                    [ Element.centerX
+                    , Element.centerY
+                    , Element.padding 10
+                    , Border.width 2
+                    , Border.color (Element.rgb 0 0 0)
+                    , Background.color (Element.rgb 0 1 0)
+                    ]
+                    { onPress = Just StartAgainClicked
+                    , label = Element.text "Start again"
+                    }
+                ]
+        ]
+        (viewSystem level.width level.height level.system)
+
+
+
 ---- UPDATE
 
 
 type Msg
-    = ArrowUpPressed
+    = StartClicked
+      -- IN LEVEL
+    | ArrowUpPressed
     | ArrowDownPressed
     | ArrowLeftPressed
     | ArrowRightPressed
+      -- GAME WON/OVER
+    | StartAgainClicked
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    let
-        handleArrowPressed deltaX deltaY =
-            ( { model | system = step deltaX deltaY model.system }
-            , Cmd.none
-            )
-    in
-    case msg of
-        ArrowUpPressed ->
-            handleArrowPressed 0 -1
+    case model of
+        Welcome ->
+            case msg of
+                StartClicked ->
+                    ( InLevel 0 0 level0, Cmd.none )
 
-        ArrowDownPressed ->
-            handleArrowPressed 0 1
+                _ ->
+                    ( model, Cmd.none )
 
-        ArrowLeftPressed ->
-            handleArrowPressed -1 0
+        InLevel score name level ->
+            let
+                handleArrowPressed deltaX deltaY =
+                    let
+                        newSystem =
+                            step level.width level.height deltaX deltaY level.system
 
-        ArrowRightPressed ->
-            handleArrowPressed 1 0
+                        newLevel =
+                            { level | system = newSystem }
+                    in
+                    case level.isFinished newSystem of
+                        Running ->
+                            ( InLevel score name newLevel
+                            , Cmd.none
+                            )
+
+                        Lost levelScore ->
+                            ( GameOver (score + levelScore) newLevel
+                            , Cmd.none
+                            )
+
+                        Won levelScore ->
+                            case name of
+                                0 ->
+                                    ( InLevel (score + levelScore) 1 level1
+                                    , Cmd.none
+                                    )
+
+                                1 ->
+                                    ( GameWon (score + levelScore)
+                                    , Cmd.none
+                                    )
+
+                                _ ->
+                                    ( model, Cmd.none )
+            in
+            case msg of
+                ArrowUpPressed ->
+                    handleArrowPressed 0 -1
+
+                ArrowDownPressed ->
+                    handleArrowPressed 0 1
+
+                ArrowLeftPressed ->
+                    handleArrowPressed -1 0
+
+                ArrowRightPressed ->
+                    handleArrowPressed 1 0
+
+                _ ->
+                    ( model, Cmd.none )
+
+        GameWon score ->
+            case msg of
+                StartAgainClicked ->
+                    ( InLevel 0 0 level0
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        GameOver score _ ->
+            case msg of
+                StartAgainClicked ->
+                    ( InLevel 0 0 level0
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
 
 
 
 --- STEP
 
 
-step : Int -> Int -> System Store -> System Store
-step deltaX deltaY system =
+step : Int -> Int -> Int -> Int -> System Store -> System Store
+step width height deltaX deltaY system =
     system
-        |> movePlayer deltaX deltaY
+        |> movePlayer width height deltaX deltaY
         |> Maybe.map
             (fight
-                >> moveEnemies
-                >> moveTrappers
+                >> moveEnemies width height
+                >> moveTrappers width height
                 >> switchEnemiesTeam
                 >> stepSpawners
             )
@@ -486,8 +812,8 @@ step deltaX deltaY system =
 -- STEP PLAYER MOVE
 
 
-movePlayer : Int -> Int -> System Store -> Maybe (System Store)
-movePlayer deltaX deltaY system =
+movePlayer : Int -> Int -> Int -> Int -> System Store -> Maybe (System Store)
+movePlayer width height deltaX deltaY system =
     let
         enemies =
             Ecs.with2 withPosition withEnemy system
@@ -506,19 +832,22 @@ movePlayer deltaX deltaY system =
                 in
                 if List.any (controlledByEnemy newPlayerPosition.x newPlayerPosition.y) enemies then
                     Nothing
-                else if newPlayerPosition /= normalizePosition newPlayerPosition then
+                else if
+                    newPlayerPosition
+                        /= normalizePosition width height newPlayerPosition
+                then
                     Nothing
                 else
                     Just <|
                         Ecs.setComponent withPosition
                             playerId
-                            (normalizePosition newPlayerPosition)
+                            (normalizePosition width height newPlayerPosition)
                             system
             )
 
 
-normalizePosition : Position -> Position
-normalizePosition position =
+normalizePosition : Int -> Int -> Position -> Position
+normalizePosition width height position =
     { position
         | x = clamp 0 (width - 1) position.x
         , y = clamp 0 (height - 1) position.y
@@ -597,13 +926,13 @@ fightTrapper ( id, ( trapper, trapperPosition ) ) system =
 -- STEP ENEMIES POSITION
 
 
-moveEnemies : System Store -> System Store
-moveEnemies system =
-    List.foldl moveEnemy system (Ecs.with2 withEnemy withPosition system)
+moveEnemies : Int -> Int -> System Store -> System Store
+moveEnemies width height system =
+    List.foldl (moveEnemy width height) system (Ecs.with2 withEnemy withPosition system)
 
 
-moveEnemy : ( Id, ( Enemy, Position ) ) -> System Store -> System Store
-moveEnemy ( id, ( enemy, enemyPosition ) ) system =
+moveEnemy : Int -> Int -> ( Id, ( Enemy, Position ) ) -> System Store -> System Store
+moveEnemy width height ( id, ( enemy, enemyPosition ) ) system =
     let
         obstacles =
             getObstacles id system
@@ -613,7 +942,7 @@ moveEnemy ( id, ( enemy, enemyPosition ) ) system =
                 |> List.head
                 |> Maybe.map (Tuple.second >> Tuple.second)
     in
-    Maybe.map (walkTo obstacles enemyPosition)
+    Maybe.map (walkTo width height obstacles enemyPosition)
         playerPosition
         |> Maybe.map
             (\newPosition ->
@@ -623,14 +952,16 @@ moveEnemy ( id, ( enemy, enemyPosition ) ) system =
 
 
 walkTo :
-    List Position
+    Int
+    -> Int
+    -> List Position
     -> Position
     -> Position
     -> Position
-walkTo obstacles enemyPosition playerPosition =
+walkTo width height obstacles enemyPosition playerPosition =
     let
         maybeNewEnemyPosition =
-            AStar.compute (aStarConfig obstacles)
+            AStar.compute (aStarConfig width height obstacles)
                 ( enemyPosition.x, enemyPosition.y )
                 ( playerPosition.x, playerPosition.y )
                 |> Maybe.andThen (List.drop 1 >> List.head)
@@ -660,33 +991,36 @@ controlledByEnemy x y ( enemyPosition, enemy ) =
             False
 
 
-aStarConfig : List Position -> AStar.Config
-aStarConfig obstacles =
+aStarConfig : Int -> Int -> List Position -> AStar.Config
+aStarConfig width height obstacles =
     { heuristicCostEstimate =
         \goal current ->
             toFloat <|
                 ((Tuple.first goal - Tuple.first current) ^ 2)
                     + ((Tuple.second goal - Tuple.second current) ^ 2)
-    , neighbours =
-        \( x, y ) ->
-            let
-                inBounds ( neighbourX, neighbourY ) =
-                    (neighbourX >= 0)
-                        && (neighbourX <= width)
-                        && (neighbourY >= 0)
-                        && (neighbourY <= height)
-
-                isFree neighbour =
-                    not (List.member (positionFromTuple neighbour) obstacles)
-            in
-            List.filter isFree <|
-                List.filter inBounds
-                    [ ( x, y + 1 )
-                    , ( x - 1, y )
-                    , ( x + 1, y )
-                    , ( x, y - 1 )
-                    ]
+    , neighbours = neighbours width height obstacles
     }
+
+
+neighbours : Int -> Int -> List Position -> ( Int, Int ) -> List ( Int, Int )
+neighbours width height obstacles ( x, y ) =
+    let
+        inBounds ( neighbourX, neighbourY ) =
+            (neighbourX >= 0)
+                && (neighbourX < width)
+                && (neighbourY >= 0)
+                && (neighbourY < height)
+
+        isFree neighbour =
+            not (List.member (positionFromTuple neighbour) obstacles)
+    in
+    List.filter isFree <|
+        List.filter inBounds <|
+            [ ( x, y + 1 )
+            , ( x - 1, y )
+            , ( x + 1, y )
+            , ( x, y - 1 )
+            ]
 
 
 
@@ -714,13 +1048,13 @@ getObstacles id system =
         ]
 
 
-moveTrappers : System Store -> System Store
-moveTrappers system =
-    List.foldl moveTrapper system (Ecs.with2 withTrapper withPosition system)
+moveTrappers : Int -> Int -> System Store -> System Store
+moveTrappers width height system =
+    List.foldl (moveTrapper width height) system (Ecs.with2 withTrapper withPosition system)
 
 
-moveTrapper : ( Id, ( Trapper, Position ) ) -> System Store -> System Store
-moveTrapper ( id, ( trapper, trapperPosition ) ) system =
+moveTrapper : Int -> Int -> ( Id, ( Trapper, Position ) ) -> System Store -> System Store
+moveTrapper width height ( id, ( trapper, trapperPosition ) ) system =
     let
         obstacles =
             getObstacles id system
@@ -730,7 +1064,7 @@ moveTrapper ( id, ( trapper, trapperPosition ) ) system =
                 |> List.head
                 |> Maybe.map (Tuple.second >> Tuple.second)
     in
-    Maybe.map (walkTo obstacles trapperPosition)
+    Maybe.map (walkTo width height obstacles trapperPosition)
         playerPosition
         |> Maybe.map
             (\newPosition ->
