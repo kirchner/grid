@@ -29,6 +29,8 @@ main =
 type alias Store =
     { nextId : Int
     , position : Dict Id Position
+    , movement : Dict Id Movement
+    , obstruction : Dict Id Obstruction
     , player : Dict Id Player
     , enemy : Dict Id Enemy
     , spawner : Dict Id Spawner
@@ -53,6 +55,30 @@ withPosition =
     Ecs.focus
         { get = .position
         , set = \value store -> { store | position = value }
+        }
+
+
+type Movement
+    = Movement
+
+
+withMovement : Focus Store Movement
+withMovement =
+    Ecs.focus
+        { get = .movement
+        , set = \value store -> { store | movement = value }
+        }
+
+
+type Obstruction
+    = Obstruction
+
+
+withObstruction : Focus Store Obstruction
+withObstruction =
+    Ecs.focus
+        { get = .obstruction
+        , set = \value store -> { store | obstruction = value }
         }
 
 
@@ -141,9 +167,7 @@ type Model
 
 init : {} -> ( Model, Cmd Msg )
 init _ =
-    ( Welcome
-    , Cmd.none
-    )
+    ( Welcome, Cmd.none )
 
 
 
@@ -173,6 +197,8 @@ emptySystem =
     , spawner = Dict.empty
     , mine = Dict.empty
     , trapper = Dict.empty
+    , movement = Dict.empty
+    , obstruction = Dict.empty
     }
 
 
@@ -189,8 +215,8 @@ level0 =
     , height = height
     , system =
         emptySystem
-            |> spawnPlayer 5 5
-            |> spawnEnemy 3 Red { x = 0, y = 0 }
+            |> spawnPlayer { x = 5, y = 5 }
+            |> spawnEnemy { x = 0, y = 0 } { left = 3, side = Red }
     , info = "Press the Arrow Keys!"
     , isFinished = isFinished width height 10
     }
@@ -209,9 +235,9 @@ level1 =
     , height = height
     , system =
         emptySystem
-            |> spawnPlayer 4 4
-            |> spawnEnemy 1 Red { x = 0, y = 0 }
-            |> spawnTrapper 8 { x = width - 1, y = height - 1 }
+            |> spawnPlayer { x = 4, y = 4 }
+            |> spawnEnemy { x = 0, y = 0 } { left = 1, side = Red }
+            |> spawnTrapper { x = width - 1, y = height - 1 } { left = 8 }
     , info = "Watch out!"
     , isFinished = isFinished width height 20
     }
@@ -274,58 +300,37 @@ isFinished width height score system =
 ---- SPAWNING
 
 
-spawnPlayer :
-    Int
-    -> Int
-    -> System Store
-    -> System Store
-spawnPlayer x y =
+spawnPlayer : Position -> System Store -> System Store
+spawnPlayer position system =
     Ecs.spawnEntity
         (\newId ->
             Ecs.setComponent withPlayer newId Player
-                >> Ecs.setComponent withPosition newId { x = x, y = y }
-        )
-
-
-spawnSpawner :
-    (Position -> System Store -> System Store)
-    -> Int
-    -> Int
-    -> Int
-    -> Int
-    -> System Store
-    -> System Store
-spawnSpawner spawn x y interval left =
-    let
-        newSpawner =
-            Spawner
-                { interval = interval
-                , left = left
-                , spawn = spawn
-                }
-    in
-    Ecs.spawnEntity
-        (\newId ->
-            Ecs.setComponent withSpawner newId newSpawner
-                >> Ecs.setComponent withPosition newId { x = x, y = y }
-        )
-
-
-spawnEnemy : Int -> Side -> Position -> System Store -> System Store
-spawnEnemy left side position =
-    Ecs.spawnEntity
-        (\newId ->
-            Ecs.setComponent withEnemy newId { left = left, side = side }
                 >> Ecs.setComponent withPosition newId position
         )
+        system
 
 
-spawnTrapper : Int -> Position -> System Store -> System Store
-spawnTrapper left position =
+spawnEnemy : Position -> Enemy -> System Store -> System Store
+spawnEnemy position enemy =
     Ecs.spawnEntity
         (\newId ->
-            Ecs.setComponent withTrapper newId { left = left }
+            identity
+                >> Ecs.setComponent withEnemy newId enemy
                 >> Ecs.setComponent withPosition newId position
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withMovement newId Movement
+        )
+
+
+spawnTrapper : Position -> Trapper -> System Store -> System Store
+spawnTrapper position trapper =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withTrapper newId trapper
+                >> Ecs.setComponent withPosition newId position
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withMovement newId Movement
         )
 
 
@@ -333,8 +338,20 @@ spawnMine : Position -> System Store -> System Store
 spawnMine { x, y } =
     Ecs.spawnEntity
         (\newId ->
-            Ecs.setComponent withMine newId Mine
+            identity
+                >> Ecs.setComponent withMine newId Mine
                 >> Ecs.setComponent withPosition newId { x = x, y = y }
+                >> Ecs.setComponent withObstruction newId Obstruction
+        )
+
+
+spawnSpawner : Position -> Spawner -> System Store -> System Store
+spawnSpawner position spawner =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withSpawner newId spawner
+                >> Ecs.setComponent withPosition newId position
         )
 
 
@@ -800,9 +817,9 @@ step width height deltaX deltaY system =
         |> movePlayer width height deltaX deltaY
         |> Maybe.map
             (fight
-                >> moveEnemies width height
-                >> moveTrappers width height
-                >> switchEnemiesTeam
+                >> moveEntities width height
+                >> stepTrapper
+                >> stepEnemies
                 >> stepSpawners
             )
         |> Maybe.withDefault system
@@ -926,13 +943,15 @@ fightTrapper ( id, ( trapper, trapperPosition ) ) system =
 -- STEP ENEMIES POSITION
 
 
-moveEnemies : Int -> Int -> System Store -> System Store
-moveEnemies width height system =
-    List.foldl (moveEnemy width height) system (Ecs.with2 withEnemy withPosition system)
+moveEntities : Int -> Int -> System Store -> System Store
+moveEntities width height system =
+    List.foldl (moveEntity width height)
+        system
+        (Ecs.with2 withMovement withPosition system)
 
 
-moveEnemy : Int -> Int -> ( Id, ( Enemy, Position ) ) -> System Store -> System Store
-moveEnemy width height ( id, ( enemy, enemyPosition ) ) system =
+moveEntity : Int -> Int -> ( Id, ( Movement, Position ) ) -> System Store -> System Store
+moveEntity width height ( id, ( _, position ) ) system =
     let
         obstacles =
             getObstacles id system
@@ -942,7 +961,7 @@ moveEnemy width height ( id, ( enemy, enemyPosition ) ) system =
                 |> List.head
                 |> Maybe.map (Tuple.second >> Tuple.second)
     in
-    Maybe.map (walkTo width height obstacles enemyPosition)
+    Maybe.map (walkTo width height obstacles position)
         playerPosition
         |> Maybe.map
             (\newPosition ->
@@ -958,24 +977,24 @@ walkTo :
     -> Position
     -> Position
     -> Position
-walkTo width height obstacles enemyPosition playerPosition =
+walkTo width height obstacles position playerPosition =
     let
-        maybeNewEnemyPosition =
+        maybeNewPosition =
             AStar.compute (aStarConfig width height obstacles)
-                ( enemyPosition.x, enemyPosition.y )
+                ( position.x, position.y )
                 ( playerPosition.x, playerPosition.y )
                 |> Maybe.andThen (List.drop 1 >> List.head)
                 |> Maybe.map positionFromTuple
     in
-    case maybeNewEnemyPosition of
+    case maybeNewPosition of
         Nothing ->
-            enemyPosition
+            position
 
-        Just newEnemyPosition ->
-            if List.member newEnemyPosition obstacles || newEnemyPosition == playerPosition then
-                enemyPosition
+        Just newPosition ->
+            if List.member newPosition obstacles || newPosition == playerPosition then
+                position
             else
-                newEnemyPosition
+                newPosition
 
 
 controlledByEnemy : Int -> Int -> ( Position, Enemy ) -> Bool
@@ -1031,96 +1050,68 @@ neighbours width height obstacles ( x, y ) =
 -}
 getObstacles : Id -> System Store -> List Position
 getObstacles id system =
+    Ecs.with2 withObstruction withPosition system
+        |> List.filterMap
+            (\( otherId, ( _, position ) ) ->
+                if otherId /= id then
+                    Just position
+                else
+                    Nothing
+            )
+
+
+stepTrapper : System Store -> System Store
+stepTrapper system =
+    List.foldl stepTrapperHelp system (Ecs.with2 withTrapper withPosition system)
+
+
+stepTrapperHelp : ( Id, ( Trapper, Position ) ) -> System Store -> System Store
+stepTrapperHelp ( id, ( trapper, trapperPosition ) ) system =
+    if trapper.left > 0 then
+        Ecs.setComponent withTrapper
+            id
+            { trapper | left = trapper.left - 1 }
+            system
+    else
+        system
+            |> Ecs.setComponent withTrapper id { trapper | left = 8 }
+            |> spawnMine trapperPosition
+
+
+
+-- STEP ENEMIES
+
+
+stepEnemies : System Store -> System Store
+stepEnemies system =
+    List.foldl stepEnemy system (Ecs.with withEnemy system)
+
+
+stepEnemy : ( Id, Enemy ) -> System Store -> System Store
+stepEnemy ( id, enemy ) system =
     let
-        filter ( otherId, ( _, position ) ) =
-            if otherId /= id then
-                Just position
+        newEnemy =
+            if enemy.left > 0 then
+                { enemy | left = enemy.left - 1 }
             else
-                Nothing
+                { enemy
+                    | left =
+                        case enemy.side of
+                            Green ->
+                                8
+
+                            Red ->
+                                2
+                    , side =
+                        case enemy.side of
+                            Green ->
+                                Red
+
+                            Red ->
+                                Green
+                }
     in
-    List.concat
-        [ Ecs.with2 withEnemy withPosition system
-            |> List.filterMap filter
-        , Ecs.with2 withTrapper withPosition system
-            |> List.filterMap filter
-        , Ecs.with2 withMine withPosition system
-            |> List.filterMap filter
-        ]
-
-
-moveTrappers : Int -> Int -> System Store -> System Store
-moveTrappers width height system =
-    List.foldl (moveTrapper width height) system (Ecs.with2 withTrapper withPosition system)
-
-
-moveTrapper : Int -> Int -> ( Id, ( Trapper, Position ) ) -> System Store -> System Store
-moveTrapper width height ( id, ( trapper, trapperPosition ) ) system =
-    let
-        obstacles =
-            getObstacles id system
-
-        playerPosition =
-            Ecs.with2 withPlayer withPosition system
-                |> List.head
-                |> Maybe.map (Tuple.second >> Tuple.second)
-    in
-    Maybe.map (walkTo width height obstacles trapperPosition)
-        playerPosition
-        |> Maybe.map
-            (\newPosition ->
-                system
-                    |> Ecs.setComponent withPosition id newPosition
-                    |> (if trapper.left > 0 then
-                            Ecs.setComponent withTrapper
-                                id
-                                { trapper | left = trapper.left - 1 }
-                        else
-                            Ecs.setComponent withTrapper id { trapper | left = 8 }
-                                >> spawnMine trapperPosition
-                       )
-            )
-        |> Maybe.withDefault system
-
-
-
--- STEP ENEMIES TEAM
-
-
-switchEnemiesTeam : System Store -> System Store
-switchEnemiesTeam system =
-    List.foldl switchEnemyTeam system (Ecs.having2 withPosition withEnemy system)
-
-
-switchEnemyTeam : Id -> System Store -> System Store
-switchEnemyTeam id system =
-    Ecs.getComponent withEnemy id system
-        |> Maybe.map
-            (\enemy ->
-                let
-                    newEnemy =
-                        if enemy.left > 0 then
-                            { enemy | left = enemy.left - 1 }
-                        else
-                            { enemy
-                                | left =
-                                    case enemy.side of
-                                        Green ->
-                                            8
-
-                                        Red ->
-                                            2
-                                , side =
-                                    case enemy.side of
-                                        Green ->
-                                            Red
-
-                                        Red ->
-                                            Green
-                            }
-                in
-                Ecs.setComponent withEnemy id newEnemy system
-            )
-        |> Maybe.withDefault system
+    Ecs.setComponent withEnemy id newEnemy system
 
 
 
@@ -1129,32 +1120,22 @@ switchEnemyTeam id system =
 
 stepSpawners : System Store -> System Store
 stepSpawners system =
-    let
-        spawners =
-            Ecs.having withSpawner system
-    in
-    List.foldl stepSpawner system spawners
+    List.foldl stepSpawner system (Ecs.with2 withSpawner withPosition system)
 
 
-stepSpawner : Id -> System Store -> System Store
-stepSpawner id system =
-    Maybe.map2
-        (\(Spawner spawner) spawnerPosition ->
-            if spawner.left > 0 then
-                Ecs.setComponent withSpawner
-                    id
-                    (Spawner { spawner | left = spawner.left - 1 })
-                    system
-            else
-                system
-                    |> Ecs.setComponent withSpawner
-                        id
-                        (Spawner { spawner | left = spawner.interval })
-                    |> spawner.spawn spawnerPosition
-        )
-        (Ecs.getComponent withSpawner id system)
-        (Ecs.getComponent withPosition id system)
-        |> Maybe.withDefault system
+stepSpawner : ( Id, ( Spawner, Position ) ) -> System Store -> System Store
+stepSpawner ( id, ( Spawner spawner, spawnerPosition ) ) system =
+    if spawner.left > 0 then
+        Ecs.setComponent withSpawner
+            id
+            (Spawner { spawner | left = spawner.left - 1 })
+            system
+    else
+        system
+            |> Ecs.setComponent withSpawner
+                id
+                (Spawner { spawner | left = spawner.interval })
+            |> spawner.spawn spawnerPosition
 
 
 
