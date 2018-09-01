@@ -108,41 +108,38 @@ iterate width height goal ({ closedSet, openSet, fScore, gScore, cameFrom } as s
                             neighbourGScore =
                                 Dict.get current gScore
                                     |> Maybe.withDefault (1 / 0)
+
+                            newCameFrom =
+                                Dict.insert neighbour
+                                    current
+                                    intermediateState.cameFrom
+
+                            newGScore =
+                                Dict.insert neighbour
+                                    tentativeGScore
+                                    intermediateState.gScore
+
+                            newFScore =
+                                Dict.insert neighbour
+                                    (tentativeGScore + h goal neighbour)
+                                    intermediateState.fScore
                         in
                         if Set.member neighbour closedSet then
                             intermediateState
                         else if not (Set.member neighbour intermediateState.openSet) then
                             { intermediateState
                                 | openSet = Set.insert neighbour intermediateState.openSet
-                                , cameFrom =
-                                    Dict.insert neighbour
-                                        current
-                                        intermediateState.cameFrom
-                                , gScore =
-                                    Dict.insert neighbour
-                                        tentativeGScore
-                                        intermediateState.gScore
-                                , fScore =
-                                    Dict.insert neighbour
-                                        (tentativeGScore + h goal neighbour)
-                                        intermediateState.fScore
+                                , cameFrom = newCameFrom
+                                , gScore = newGScore
+                                , fScore = newFScore
                             }
                         else if tentativeGScore >= neighbourGScore then
                             intermediateState
                         else
                             { intermediateState
-                                | cameFrom =
-                                    Dict.insert neighbour
-                                        current
-                                        intermediateState.cameFrom
-                                , gScore =
-                                    Dict.insert neighbour
-                                        tentativeGScore
-                                        intermediateState.gScore
-                                , fScore =
-                                    Dict.insert neighbour
-                                        (tentativeGScore + h goal neighbour)
-                                        intermediateState.fScore
+                                | cameFrom = newCameFrom
+                                , gScore = newGScore
+                                , fScore = newFScore
                             }
                 in
                 Loop
@@ -162,6 +159,7 @@ h goal current =
             + abs (Tuple.second goal - Tuple.second current)
 
 
+neighbours : Int -> Int -> Node -> List Node
 neighbours width height ( x, y ) =
     let
         outOfBounds ( neighbourX, neighbourY ) =
