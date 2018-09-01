@@ -29,6 +29,7 @@ import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
 import Element.Input as Input
+import Hex
 import Html
 import Html.Attributes as Attributes
 import Json.Decode as Decode
@@ -662,11 +663,42 @@ spawnWall x y =
 ---- VIEW
 
 
+hex string =
+    let
+        toInterval start end =
+            String.slice start end string
+                |> Hex.fromString
+                |> Result.toMaybe
+                |> Maybe.map (\int -> toFloat int / 255)
+                |> Maybe.withDefault 0
+    in
+    Element.rgb
+        (toInterval 0 2)
+        (toInterval 2 4)
+        (toInterval 4 6)
+
+
+red =
+    hex "e05038"
+
+
+yellow =
+    hex "e6af4b"
+
+
 view : Model -> Document Msg
 view model =
     { title = "grid"
     , body =
-        [ Element.layout
+        [ Element.layoutWith
+            { options =
+                [ Element.focusStyle
+                    { borderColor = Nothing
+                    , backgroundColor = Nothing
+                    , shadow = Nothing
+                    }
+                ]
+            }
             [ Element.width Element.fill
             , Element.height Element.fill
             , Font.family
@@ -677,6 +709,7 @@ view model =
                 , Font.sansSerif
                 ]
             , Font.size 32
+            , Background.color yellow
             ]
             (case model of
                 Welcome ->
@@ -722,7 +755,7 @@ viewWelcome =
             , Element.padding 10
             , Border.width 2
             , Border.color (Element.rgb 0 0 0)
-            , Background.color (Element.rgb 0 1 0)
+            , Background.color red
             , Element.htmlAttribute (Attributes.id "start-button")
             ]
             { onPress = Just StartClicked
@@ -778,10 +811,10 @@ computeTileInfo width height system =
                 (\( controlId, ( control, position ) ) ->
                     rasterizeControl width height control position
                 )
-            |> List.map (\position -> ( ( position.x, position.y ), Element.rgb 1 0.5 0.5 ))
+            |> List.map (\position -> ( ( position.x, position.y ), hex "e05038" ))
         , Ecs.with2 withPlayer withPosition system
             |> List.map (Tuple.second >> Tuple.second)
-            |> List.map (\position -> ( ( position.x, position.y ), Element.rgb 0 1 0 ))
+            |> List.map (\position -> ( ( position.x, position.y ), hex "f2cbbc" ))
         ]
             |> List.concat
             |> Dict.fromList
@@ -860,7 +893,7 @@ viewTile tileInfo system rowIndex columnIndex =
     Element.el
         [ Element.width (Element.px 80)
         , Element.height (Element.px 80)
-        , Border.width 2
+        , Border.width 1
         , Border.color (Element.rgb 0 0 0)
         , Font.color foregroundColor
         , Background.color backgroundColor
@@ -901,7 +934,7 @@ viewBetweenLevels data =
                 , Element.padding 15
                 , Border.width 2
                 , Border.color (Element.rgb 0 0 0)
-                , Background.color (Element.rgb 1 1 1)
+                , Background.color yellow
                 ]
                 [ Element.el
                     [ Element.centerX ]
@@ -915,7 +948,7 @@ viewBetweenLevels data =
                     , Element.padding 10
                     , Border.width 2
                     , Border.color (Element.rgb 0 0 0)
-                    , Background.color (Element.rgb 0 1 0)
+                    , Background.color red
                     , Element.htmlAttribute <|
                         Attributes.id "next-level-button"
                     ]
@@ -937,6 +970,7 @@ viewGameWon score =
         [ Element.centerX
         , Element.centerY
         , Element.spacing 25
+        , Background.color yellow
         ]
         [ Element.el
             [ Element.centerX ]
@@ -950,7 +984,7 @@ viewGameWon score =
             , Element.padding 10
             , Border.width 2
             , Border.color (Element.rgb 0 0 0)
-            , Background.color (Element.rgb 0 1 0)
+            , Background.color red
             , Element.htmlAttribute <|
                 Attributes.id "start-button"
             ]
@@ -977,7 +1011,7 @@ viewGameOver score level =
                 , Element.padding 15
                 , Border.width 2
                 , Border.color (Element.rgb 0 0 0)
-                , Background.color (Element.rgb 1 1 1)
+                , Background.color yellow
                 ]
                 [ Element.el
                     [ Element.centerX ]
@@ -991,7 +1025,7 @@ viewGameOver score level =
                     , Element.padding 10
                     , Border.width 2
                     , Border.color (Element.rgb 0 0 0)
-                    , Background.color (Element.rgb 0 1 0)
+                    , Background.color red
                     , Element.htmlAttribute <|
                         Attributes.id "start-button"
                     ]
