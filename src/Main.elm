@@ -33,7 +33,7 @@ type alias Store =
     , obstruction : Dict Id Obstruction
     , control : Dict Id Control
     , player : Dict Id Player
-    , enemy : Dict Id Enemy
+    , switcher : Dict Id Switcher
     , spawner : Dict Id Spawner
     , mine : Dict Id Mine
     , trapper : Dict Id Trapper
@@ -49,7 +49,7 @@ removeEntity id system =
         |> Ecs.removeComponent withObstruction id
         |> Ecs.removeComponent withControl id
         |> Ecs.removeComponent withPlayer id
-        |> Ecs.removeComponent withEnemy id
+        |> Ecs.removeComponent withSwitcher id
         |> Ecs.removeComponent withSpawner id
         |> Ecs.removeComponent withMine id
         |> Ecs.removeComponent withTrapper id
@@ -100,7 +100,7 @@ getObstructedPositions id system =
 
 
 type Control
-    = EnemyControl
+    = SwitcherControl
     | MineControl
     | ChessRookControl
 
@@ -109,7 +109,7 @@ rasterizeControl : Int -> Int -> Control -> Position -> List Position
 rasterizeControl width height control position =
     List.map (\{ x, y } -> { x = position.x + x, y = position.y + y }) <|
         case control of
-            EnemyControl ->
+            SwitcherControl ->
                 [ { x = -1, y = 0 }
                 , { x = -1, y = 1 }
                 , { x = 0, y = 1 }
@@ -133,7 +133,7 @@ type Player
     = Player
 
 
-type alias Enemy =
+type alias Switcher =
     { left : Int
     }
 
@@ -156,7 +156,7 @@ type alias Trapper =
 
 
 type Sprite
-    = EnemySprite
+    = SwitcherSprite
     | PlayerSprite
 
 
@@ -199,7 +199,7 @@ emptySystem =
     { nextId = 0
     , position = Dict.empty
     , player = Dict.empty
-    , enemy = Dict.empty
+    , switcher = Dict.empty
     , spawner = Dict.empty
     , mine = Dict.empty
     , trapper = Dict.empty
@@ -224,7 +224,7 @@ level0 =
     , system =
         emptySystem
             |> spawnPlayer { x = 5, y = 5 }
-            |> spawnEnemy { x = 0, y = 0 } { left = 3 }
+            |> spawnSwitcher { x = 0, y = 0 } { left = 3 }
     , info = "Press the Arrow Keys!"
     , isFinished = isFinished width height 10
     }
@@ -244,7 +244,7 @@ level1 =
     , system =
         emptySystem
             |> spawnPlayer { x = 4, y = 4 }
-            -- |> spawnEnemy { x = 0, y = 0 } { left = 1 }
+            -- |> spawnSwitcher { x = 0, y = 0 } { left = 1 }
             |> spawnChessRook { x = 0, y = 0 }
             |> spawnTrapper { x = width - 1, y = height - 1 } { left = 8 }
     , info = "Watch out!"
@@ -256,7 +256,7 @@ isFinished : Int -> Int -> Int -> System Store -> Finished
 isFinished width height score system =
     let
         allEnemiesGone =
-            List.isEmpty (Ecs.having withEnemy system)
+            List.isEmpty (Ecs.having withSwitcher system)
                 && List.isEmpty (Ecs.having withTrapper system)
 
         playerSurrounded =
@@ -273,7 +273,7 @@ isFinished width height score system =
                                 |> List.filter inBounds
                                 |> List.all
                                     (\( neighbourX, neighbourY ) ->
-                                        controlledByEnemy
+                                        controlledBySwitcher
                                             width
                                             height
                                             { x = neighbourX, y = neighbourY }
@@ -315,17 +315,17 @@ spawnPlayer position system =
         system
 
 
-spawnEnemy : Position -> Enemy -> System Store -> System Store
-spawnEnemy position enemy =
+spawnSwitcher : Position -> Switcher -> System Store -> System Store
+spawnSwitcher position switcher =
     Ecs.spawnEntity
         (\newId ->
             identity
-                >> Ecs.setComponent withEnemy newId enemy
+                >> Ecs.setComponent withSwitcher newId switcher
                 >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withMovement newId Movement
-                >> Ecs.setComponent withControl newId EnemyControl
-                >> Ecs.setComponent withSprite newId EnemySprite
+                >> Ecs.setComponent withControl newId SwitcherControl
+                >> Ecs.setComponent withSprite newId SwitcherSprite
         )
 
 
@@ -338,7 +338,7 @@ spawnChessRook position =
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withMovement newId Movement
                 >> Ecs.setComponent withControl newId ChessRookControl
-                >> Ecs.setComponent withSprite newId EnemySprite
+                >> Ecs.setComponent withSprite newId SwitcherSprite
         )
 
 
@@ -351,7 +351,7 @@ spawnTrapper position trapper =
                 >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withMovement newId Movement
-                >> Ecs.setComponent withSprite newId EnemySprite
+                >> Ecs.setComponent withSprite newId SwitcherSprite
         )
 
 
@@ -364,7 +364,7 @@ spawnMine position =
                 >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withControl newId MineControl
-                >> Ecs.setComponent withSprite newId EnemySprite
+                >> Ecs.setComponent withSprite newId SwitcherSprite
         )
 
 
@@ -495,19 +495,19 @@ viewSystem width height system =
 
         pathTiles =
             List.concat
-                [ Ecs.with2 withEnemy withPosition system
+                [ Ecs.with2 withSwitcher withPosition system
                     |> List.filterMap
-                        (\( enemyId, ( _, enemyPosition ) ) ->
+                        (\( switcherId, ( _, switcherPosition ) ) ->
                             Ecs.with2 withPlayer withPosition system
                                 |> List.head
                                 |> Maybe.andThen
                                     (\( playerId, ( _, playerPosition ) ) ->
                                         let
                                             obstacles =
-                                                getObstructedPositions enemyId system
+                                                getObstructedPositions switcherId system
                                         in
                                         AStar.compute (aStarConfig width height obstacles)
-                                            ( enemyPosition.x, enemyPosition.y )
+                                            ( switcherPosition.x, switcherPosition.y )
                                             ( playerPosition.x, playerPosition.y )
                                     )
                                 |> Maybe.map (List.map (\( x, y ) -> { x = x, y = y }))
@@ -534,16 +534,16 @@ viewSystem width height system =
                 ]
 
         redTiles =
-            redEnemyTiles
+            redSwitcherTiles
 
-        redEnemyTiles =
+        redSwitcherTiles =
             Ecs.with2 withSprite withPosition system
                 |> List.filterMap
-                    (\( spriteId, ( sprite, enemyPosition ) ) ->
+                    (\( spriteId, ( sprite, switcherPosition ) ) ->
                         case sprite of
-                            EnemySprite ->
-                                if List.member enemyPosition controlledTiles then
-                                    Just enemyPosition
+                            SwitcherSprite ->
+                                if List.member switcherPosition controlledTiles then
+                                    Just switcherPosition
                                 else
                                     Nothing
 
@@ -551,16 +551,16 @@ viewSystem width height system =
                                 Nothing
                     )
 
-        greenEnemyTiles =
+        greenSwitcherTiles =
             Ecs.with2 withSprite withPosition system
                 |> List.filterMap
-                    (\( spriteId, ( sprite, enemyPosition ) ) ->
+                    (\( spriteId, ( sprite, switcherPosition ) ) ->
                         case sprite of
-                            EnemySprite ->
-                                if List.member enemyPosition controlledTiles then
+                            SwitcherSprite ->
+                                if List.member switcherPosition controlledTiles then
                                     Nothing
                                 else
-                                    Just enemyPosition
+                                    Just switcherPosition
 
                             _ ->
                                 Nothing
@@ -577,7 +577,7 @@ viewSystem width height system =
             List.concat
                 [ playerTiles
                 , trapperTiles
-                , greenEnemyTiles
+                , greenSwitcherTiles
                 ]
 
         playerTiles =
@@ -880,7 +880,7 @@ movePlayer : Int -> Int -> Int -> Int -> System Store -> Maybe (System Store)
 movePlayer width height deltaX deltaY system =
     let
         enemies =
-            Ecs.with2 withPosition withEnemy system
+            Ecs.with2 withPosition withSwitcher system
                 |> List.map Tuple.second
     in
     Ecs.with2 withPlayer withPosition system
@@ -900,7 +900,7 @@ movePlayer width height deltaX deltaY system =
                     playerActuallyMoved =
                         newPlayerPosition == normalizedPlayerPosition
                 in
-                if controlledByEnemy width height newPlayerPosition system then
+                if controlledBySwitcher width height newPlayerPosition system then
                     Nothing
                 else if not playerActuallyMoved then
                     Nothing
@@ -926,11 +926,11 @@ fight system =
 
 fightEnemies : System Store -> System Store
 fightEnemies system =
-    List.foldl fightEnemy system (Ecs.with2 withEnemy withPosition system)
+    List.foldl fightSwitcher system (Ecs.with2 withSwitcher withPosition system)
 
 
-fightEnemy : ( Id, ( Enemy, Position ) ) -> System Store -> System Store
-fightEnemy ( id, ( enemy, enemyPosition ) ) system =
+fightSwitcher : ( Id, ( Switcher, Position ) ) -> System Store -> System Store
+fightSwitcher ( id, ( switcher, switcherPosition ) ) system =
     let
         hasControl =
             Ecs.getComponent withControl id system /= Nothing
@@ -940,8 +940,8 @@ fightEnemy ( id, ( enemy, enemyPosition ) ) system =
             if hasControl then
                 system
             else if
-                (playerPosition.x == enemyPosition.x)
-                    && (playerPosition.y == enemyPosition.y)
+                (playerPosition.x == switcherPosition.x)
+                    && (playerPosition.y == switcherPosition.y)
             then
                 removeEntity id system
             else
@@ -1038,8 +1038,8 @@ walkTo width height obstacles position playerPosition =
                 newPosition
 
 
-controlledByEnemy : Int -> Int -> Position -> System Store -> Bool
-controlledByEnemy width height position system =
+controlledBySwitcher : Int -> Int -> Position -> System Store -> Bool
+controlledBySwitcher width height position system =
     let
         controlledPositions =
             Ecs.with2 withControl withPosition system
@@ -1111,22 +1111,22 @@ stepTrapperHelp ( id, ( trapper, trapperPosition ) ) system =
 
 stepEnemies : System Store -> System Store
 stepEnemies system =
-    List.foldl stepEnemy system (Ecs.with withEnemy system)
+    List.foldl stepSwitcher system (Ecs.with withSwitcher system)
 
 
-stepEnemy : ( Id, Enemy ) -> System Store -> System Store
-stepEnemy ( id, enemy ) system =
+stepSwitcher : ( Id, Switcher ) -> System Store -> System Store
+stepSwitcher ( id, switcher ) system =
     let
         hasControl =
             Ecs.getComponent withControl id system /= Nothing
     in
-    if enemy.left > 0 then
-        Ecs.setComponent withEnemy id { enemy | left = enemy.left - 1 } system
+    if switcher.left > 0 then
+        Ecs.setComponent withSwitcher id { switcher | left = switcher.left - 1 } system
     else
         system
-            |> Ecs.setComponent withEnemy
+            |> Ecs.setComponent withSwitcher
                 id
-                { enemy
+                { switcher
                     | left =
                         if hasControl then
                             2
@@ -1136,7 +1136,7 @@ stepEnemy ( id, enemy ) system =
             |> (if hasControl then
                     Ecs.removeComponent withControl id
                 else
-                    Ecs.setComponent withControl id EnemyControl
+                    Ecs.setComponent withControl id SwitcherControl
                )
 
 
@@ -1208,11 +1208,11 @@ withPlayer =
         }
 
 
-withEnemy : Focus Store Enemy
-withEnemy =
+withSwitcher : Focus Store Switcher
+withSwitcher =
     Ecs.focus
-        { get = .enemy
-        , set = \value store -> { store | enemy = value }
+        { get = .switcher
+        , set = \value store -> { store | switcher = value }
         }
 
 
