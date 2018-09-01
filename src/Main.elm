@@ -56,6 +56,10 @@ removeEntity id system =
         |> Ecs.removeComponent withSprite id
 
 
+
+-- COMPONENTS
+
+
 type alias Position =
     { x : Int
     , y : Int
@@ -67,36 +71,32 @@ positionFromTuple ( x, y ) =
     { x = x, y = y }
 
 
-withPosition : Focus Store Position
-withPosition =
-    Ecs.focus
-        { get = .position
-        , set = \value store -> { store | position = value }
-        }
+normalizePosition : Int -> Int -> Position -> Position
+normalizePosition width height position =
+    { position
+        | x = clamp 0 (width - 1) position.x
+        , y = clamp 0 (height - 1) position.y
+    }
 
 
 type Movement
     = Movement
 
 
-withMovement : Focus Store Movement
-withMovement =
-    Ecs.focus
-        { get = .movement
-        , set = \value store -> { store | movement = value }
-        }
-
-
 type Obstruction
     = Obstruction
 
 
-withObstruction : Focus Store Obstruction
-withObstruction =
-    Ecs.focus
-        { get = .obstruction
-        , set = \value store -> { store | obstruction = value }
-        }
+getObstructedPositions : Id -> System Store -> List Position
+getObstructedPositions id system =
+    Ecs.with2 withObstruction withPosition system
+        |> List.filterMap
+            (\( otherId, ( _, position ) ) ->
+                if otherId /= id then
+                    Just position
+                else
+                    Nothing
+            )
 
 
 type Control
@@ -125,46 +125,17 @@ rasterizeControl width height control position =
                 [ { x = 0, y = 0 } ]
 
             ChessRookControl ->
-                List.map (\x -> { x = x, y = 0 }) (List.range 0 (width - 1))
-                    ++ List.map (\y -> { x = 0, y = y }) (List.range 0 (height - 1))
-
-
-withControl : Focus Store Control
-withControl =
-    Ecs.focus
-        { get = .control
-        , set = \value store -> { store | control = value }
-        }
+                List.map (\x -> { x = x, y = 0 }) (List.range (1 - width) (width - 1))
+                    ++ List.map (\y -> { x = 0, y = y }) (List.range (1 - height) (height - 1))
 
 
 type Player
     = Player
 
 
-withPlayer : Focus Store Player
-withPlayer =
-    Ecs.focus
-        { get = .player
-        , set = \value store -> { store | player = value }
-        }
-
-
 type alias Enemy =
     { left : Int
     }
-
-
-type Side
-    = Red
-    | Green
-
-
-withEnemy : Focus Store Enemy
-withEnemy =
-    Ecs.focus
-        { get = .enemy
-        , set = \value store -> { store | enemy = value }
-        }
 
 
 type Spawner
@@ -175,24 +146,8 @@ type Spawner
         }
 
 
-withSpawner : Focus Store Spawner
-withSpawner =
-    Ecs.focus
-        { get = .spawner
-        , set = \value store -> { store | spawner = value }
-        }
-
-
 type Mine
     = Mine
-
-
-withMine : Focus Store Mine
-withMine =
-    Ecs.focus
-        { get = .mine
-        , set = \value store -> { store | mine = value }
-        }
 
 
 type alias Trapper =
@@ -200,25 +155,9 @@ type alias Trapper =
     }
 
 
-withTrapper : Focus Store Trapper
-withTrapper =
-    Ecs.focus
-        { get = .trapper
-        , set = \value store -> { store | trapper = value }
-        }
-
-
 type Sprite
     = EnemySprite
     | PlayerSprite
-
-
-withSprite : Focus Store Sprite
-withSprite =
-    Ecs.focus
-        { get = .sprite
-        , set = \value store -> { store | sprite = value }
-        }
 
 
 
@@ -417,12 +356,12 @@ spawnTrapper position trapper =
 
 
 spawnMine : Position -> System Store -> System Store
-spawnMine { x, y } =
+spawnMine position =
     Ecs.spawnEntity
         (\newId ->
             identity
                 >> Ecs.setComponent withMine newId Mine
-                >> Ecs.setComponent withPosition newId { x = x, y = y }
+                >> Ecs.setComponent withPosition newId position
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withControl newId MineControl
                 >> Ecs.setComponent withSprite newId EnemySprite
@@ -565,7 +504,7 @@ viewSystem width height system =
                                     (\( playerId, ( _, playerPosition ) ) ->
                                         let
                                             obstacles =
-                                                getObstacles enemyId system
+                                                getObstructedPositions enemyId system
                                         in
                                         AStar.compute (aStarConfig width height obstacles)
                                             ( enemyPosition.x, enemyPosition.y )
@@ -583,7 +522,7 @@ viewSystem width height system =
                                     (\( playerId, ( _, playerPosition ) ) ->
                                         let
                                             obstacles =
-                                                getObstacles trapperId system
+                                                getObstructedPositions trapperId system
                                         in
                                         AStar.compute (aStarConfig width height obstacles)
                                             ( trapperPosition.x, trapperPosition.y )
@@ -874,6 +813,35 @@ update msg model =
 
 
 
+---- SUBSCRIPTIONS
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    Events.onKeyPress
+        (Decode.field "key" Decode.string
+            |> Decode.andThen
+                (\key ->
+                    case key of
+                        "ArrowUp" ->
+                            Decode.succeed ArrowUpPressed
+
+                        "ArrowDown" ->
+                            Decode.succeed ArrowDownPressed
+
+                        "ArrowLeft" ->
+                            Decode.succeed ArrowLeftPressed
+
+                        "ArrowRight" ->
+                            Decode.succeed ArrowRightPressed
+
+                        _ ->
+                            Decode.fail "not handling that key"
+                )
+        )
+
+
+
 --- STEP
 
 
@@ -905,7 +873,7 @@ step width height deltaX deltaY system =
 
 
 
--- STEP PLAYER MOVE
+-- MOVE PLAYER
 
 
 movePlayer : Int -> Int -> Int -> Int -> System Store -> Maybe (System Store)
@@ -945,16 +913,8 @@ movePlayer width height deltaX deltaY system =
             )
 
 
-normalizePosition : Int -> Int -> Position -> Position
-normalizePosition width height position =
-    { position
-        | x = clamp 0 (width - 1) position.x
-        , y = clamp 0 (height - 1) position.y
-    }
 
-
-
--- STEP HIT ENEMIES
+-- FIGHT
 
 
 fight : System Store -> System Store
@@ -1021,7 +981,7 @@ fightTrapper ( id, ( trapper, trapperPosition ) ) system =
 
 
 
--- STEP ENEMIES POSITION
+-- MOVE ENTITIES
 
 
 moveEntities : Int -> Int -> System Store -> System Store
@@ -1035,7 +995,7 @@ moveEntity : Int -> Int -> ( Id, ( Movement, Position ) ) -> System Store -> Sys
 moveEntity width height ( id, ( _, position ) ) system =
     let
         obstacles =
-            getObstacles id system
+            getObstructedPositions id system
 
         playerPosition =
             Ecs.with2 withPlayer withPosition system
@@ -1127,20 +1087,6 @@ neighbours width height obstacles ( x, y ) =
 -- STEP TRAPPER POSITION
 
 
-{-| Obstacles for enemy movement.
--}
-getObstacles : Id -> System Store -> List Position
-getObstacles id system =
-    Ecs.with2 withObstruction withPosition system
-        |> List.filterMap
-            (\( otherId, ( _, position ) ) ->
-                if otherId /= id then
-                    Just position
-                else
-                    Nothing
-            )
-
-
 stepTrapper : System Store -> System Store
 stepTrapper system =
     List.foldl stepTrapperHelp system (Ecs.with2 withTrapper withPosition system)
@@ -1195,7 +1141,7 @@ stepEnemy ( id, enemy ) system =
 
 
 
--- STEP SPAWNING
+-- STEP SPAWNERS
 
 
 stepSpawners : System Store -> System Store
@@ -1219,29 +1165,84 @@ stepSpawner ( id, ( Spawner spawner, spawnerPosition ) ) system =
 
 
 
----- SUBSCRIPTIONS
+---- FOCI
 
 
-subscriptions : Model -> Sub Msg
-subscriptions model =
-    Events.onKeyPress
-        (Decode.field "key" Decode.string
-            |> Decode.andThen
-                (\key ->
-                    case key of
-                        "ArrowUp" ->
-                            Decode.succeed ArrowUpPressed
+withPosition : Focus Store Position
+withPosition =
+    Ecs.focus
+        { get = .position
+        , set = \value store -> { store | position = value }
+        }
 
-                        "ArrowDown" ->
-                            Decode.succeed ArrowDownPressed
 
-                        "ArrowLeft" ->
-                            Decode.succeed ArrowLeftPressed
+withMovement : Focus Store Movement
+withMovement =
+    Ecs.focus
+        { get = .movement
+        , set = \value store -> { store | movement = value }
+        }
 
-                        "ArrowRight" ->
-                            Decode.succeed ArrowRightPressed
 
-                        _ ->
-                            Decode.fail "not handling that key"
-                )
-        )
+withObstruction : Focus Store Obstruction
+withObstruction =
+    Ecs.focus
+        { get = .obstruction
+        , set = \value store -> { store | obstruction = value }
+        }
+
+
+withControl : Focus Store Control
+withControl =
+    Ecs.focus
+        { get = .control
+        , set = \value store -> { store | control = value }
+        }
+
+
+withPlayer : Focus Store Player
+withPlayer =
+    Ecs.focus
+        { get = .player
+        , set = \value store -> { store | player = value }
+        }
+
+
+withEnemy : Focus Store Enemy
+withEnemy =
+    Ecs.focus
+        { get = .enemy
+        , set = \value store -> { store | enemy = value }
+        }
+
+
+withSpawner : Focus Store Spawner
+withSpawner =
+    Ecs.focus
+        { get = .spawner
+        , set = \value store -> { store | spawner = value }
+        }
+
+
+withMine : Focus Store Mine
+withMine =
+    Ecs.focus
+        { get = .mine
+        , set = \value store -> { store | mine = value }
+        }
+
+
+withTrapper : Focus Store Trapper
+withTrapper =
+    Ecs.focus
+        { get = .trapper
+        , set = \value store -> { store | trapper = value }
+        }
+
+
+withSprite : Focus Store Sprite
+withSprite =
+    Ecs.focus
+        { get = .sprite
+        , set = \value store -> { store | sprite = value }
+        }
