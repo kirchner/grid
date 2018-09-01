@@ -1,5 +1,6 @@
 module Main exposing (main)
 
+import AStar
 import Browser exposing (Document)
 import Browser.Events as Events
 import Dict exposing (Dict)
