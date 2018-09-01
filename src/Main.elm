@@ -330,15 +330,16 @@ type Finished
 
 allLevels : List Level
 allLevels =
-    [ l5
-    , l1
-    , l2
-    , l3
-    , l4
+    [ l0 5
+    , l1 10
+    , l2 15
+    , l3 20
+    , l4 25
+    , l5 30
     ]
 
 
-l0 =
+l0 score =
     let
         ( width, height ) =
             ( 5, 5 )
@@ -354,13 +355,13 @@ l0 =
     , isFinished =
         \system ->
             if List.isEmpty (Ecs.with withObstruction system) then
-                Won 5
+                Won score
             else
                 Running
     }
 
 
-l1 =
+l1 score =
     let
         ( width, height ) =
             ( 7, 7 )
@@ -383,18 +384,40 @@ l1 =
     , isFinished =
         \system ->
             if List.isEmpty (Ecs.with withRester system) then
-                Won 10
+                Won score
             else
                 Running
     }
 
 
-l2 =
+l2 score =
     let
         ( width, height ) =
             ( 5, 5 )
     in
     { name = "#2"
+    , width = width
+    , height = height
+    , system =
+        emptySystem
+            |> spawnPlayer (Position 1 1)
+            |> spawnArcher (Position 4 4)
+    , info = "Use the Arrow Keys!"
+    , isFinished =
+        \system ->
+            if List.isEmpty (Ecs.with withObstruction system) then
+                Won score
+            else
+                Running
+    }
+
+
+l3 score =
+    let
+        ( width, height ) =
+            ( 5, 5 )
+    in
+    { name = "#3"
     , width = width
     , height = height
     , system =
@@ -423,7 +446,7 @@ l2 =
                     getObstructedPositions -1 system
             in
             if trapperGone then
-                Won 15
+                Won score
             else if trapperTrapped then
                 Lost 0
             else
@@ -431,12 +454,12 @@ l2 =
     }
 
 
-l3 =
+l4 score =
     let
         ( width, height ) =
             ( 9, 9 )
     in
-    { name = "#3"
+    { name = "#4"
     , width = width
     , height = height
     , system =
@@ -444,16 +467,16 @@ l3 =
             |> spawnPlayer (Position 4 4)
             |> spawnSwitcher { x = 1, y = 1 } { left = 2 }
     , info = "Watch out!"
-    , isFinished = isFinished width height 20
+    , isFinished = isFinished width height score
     }
 
 
-l4 =
+l5 score =
     let
         ( width, height ) =
             ( 9, 9 )
     in
-    { name = "#3"
+    { name = "#5"
     , width = width
     , height = height
     , system =
@@ -467,29 +490,7 @@ l4 =
             |> spawnWall 4 5
             |> spawnWall 4 6
     , info = "Watch out!"
-    , isFinished = isFinished width height 25
-    }
-
-
-l5 =
-    let
-        ( width, height ) =
-            ( 5, 5 )
-    in
-    { name = "#0"
-    , width = width
-    , height = height
-    , system =
-        emptySystem
-            |> spawnPlayer (Position 1 1)
-            |> spawnArcher (Position 4 4)
-    , info = "Use the Arrow Keys!"
-    , isFinished =
-        \system ->
-            if List.isEmpty (Ecs.with withObstruction system) then
-                Won 5
-            else
-                Running
+    , isFinished = isFinished width height score
     }
 
 
