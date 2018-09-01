@@ -102,6 +102,7 @@ withObstruction =
 type Control
     = EnemyControl
     | MineControl
+    | ChessRookControl
 
 
 rasterizeControl : Int -> Int -> Control -> Position -> List Position
@@ -122,6 +123,10 @@ rasterizeControl width height control position =
 
             MineControl ->
                 [ { x = 0, y = 0 } ]
+
+            ChessRookControl ->
+                List.map (\x -> { x = x, y = 0 }) (List.range 0 (width - 1))
+                    ++ List.map (\y -> { x = 0, y = y }) (List.range 0 (height - 1))
 
 
 withControl : Focus Store Control
@@ -380,6 +385,19 @@ spawnEnemy position enemy =
                 >> Ecs.setComponent withObstruction newId Obstruction
                 >> Ecs.setComponent withMovement newId Movement
                 >> Ecs.setComponent withControl newId EnemyControl
+                >> Ecs.setComponent withSprite newId EnemySprite
+        )
+
+
+spawnChessRook : Position -> System Store -> System Store
+spawnChessRook position =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withPosition newId position
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withMovement newId Movement
+                >> Ecs.setComponent withControl newId ChessRookControl
                 >> Ecs.setComponent withSprite newId EnemySprite
         )
 
