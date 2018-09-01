@@ -876,7 +876,8 @@ step width height deltaX deltaY system =
     let
         optionallyDebugStep newSystem =
             if debugStep then
-                Debug.log "newSystem" newSystem
+                --Debug.log "newSystem" newSystem
+                newSystem
             else
                 newSystem
     in
