@@ -70,13 +70,7 @@ withPlayer =
         }
 
 
-{-| TODO: Make components not opaque
--}
-type Enemy
-    = Enemy EnemyData
-
-
-type alias EnemyData =
+type alias Enemy =
     { left : Int
     , side : Side
     }
@@ -138,8 +132,8 @@ init _ =
                     ]
             , enemy =
                 Dict.fromList
-                    [ ( 1, Enemy { left = 3, side = Red } )
-                    , ( 2, Enemy { left = 1, side = Red } )
+                    [ ( 1, { left = 3, side = Red } )
+                    , ( 2, { left = 1, side = Red } )
                     ]
             , spawner =
                 Dict.fromList
@@ -232,7 +226,7 @@ viewField system rowIndex columnIndex =
         housesEnemy =
             enemies
                 |> List.filterMap
-                    (\( enemyPosition, Enemy enemy ) ->
+                    (\( enemyPosition, enemy ) ->
                         if
                             (enemyPosition.x == columnIndex)
                                 && (enemyPosition.y == rowIndex)
@@ -246,9 +240,9 @@ viewField system rowIndex columnIndex =
         nextToEnemy =
             enemies
                 |> List.filterMap
-                    (\( enemyPosition, (Enemy { side }) as enemy ) ->
+                    (\( enemyPosition, enemy ) ->
                         if controlledByEnemy columnIndex rowIndex ( enemyPosition, enemy ) then
-                            Just side
+                            Just enemy.side
                         else
                             Nothing
                     )
@@ -377,7 +371,7 @@ fightEnemies system =
 fightEnemy : Id -> System Store -> System Store
 fightEnemy id system =
     Maybe.map2
-        (\playerPosition ( enemyPosition, Enemy { side } ) ->
+        (\playerPosition ( enemyPosition, { side } ) ->
             case side of
                 Red ->
                     system
@@ -483,7 +477,7 @@ moveEnemyHelp otherEnemies playerPosition enemyPosition enemy =
 
 
 controlledByEnemy : Int -> Int -> ( Position, Enemy ) -> Bool
-controlledByEnemy x y ( enemyPosition, Enemy enemy ) =
+controlledByEnemy x y ( enemyPosition, enemy ) =
     case enemy.side of
         Red ->
             (enemyPosition.x >= x - 1)
@@ -508,29 +502,28 @@ switchEnemyTeam : Id -> System Store -> System Store
 switchEnemyTeam id system =
     Ecs.getComponent withEnemy id system
         |> Maybe.map
-            (\(Enemy enemyData) ->
+            (\enemy ->
                 let
                     newEnemy =
-                        Enemy <|
-                            if enemyData.left > 0 then
-                                { enemyData | left = enemyData.left - 1 }
-                            else
-                                { enemyData
-                                    | left =
-                                        case enemyData.side of
-                                            Green ->
-                                                8
+                        if enemy.left > 0 then
+                            { enemy | left = enemy.left - 1 }
+                        else
+                            { enemy
+                                | left =
+                                    case enemy.side of
+                                        Green ->
+                                            8
 
-                                            Red ->
-                                                2
-                                    , side =
-                                        case enemyData.side of
-                                            Green ->
-                                                Red
+                                        Red ->
+                                            2
+                                , side =
+                                    case enemy.side of
+                                        Green ->
+                                            Red
 
-                                            Red ->
-                                                Green
-                                }
+                                        Red ->
+                                            Green
+                            }
                 in
                 Ecs.setComponent withEnemy id newEnemy system
             )
@@ -566,7 +559,7 @@ spawnEnemy id system =
                         { spawner | left = 25 }
                     |> Ecs.spawnEntity
                         (\newId ->
-                            Ecs.setComponent withEnemy newId (Enemy { left = 3, side = Red })
+                            Ecs.setComponent withEnemy newId { left = 3, side = Red }
                                 >> Ecs.setComponent withPosition newId spawnerPosition
                         )
         )
