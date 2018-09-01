@@ -20,6 +20,7 @@ module Main exposing (main)
 
 import AStar
 import Browser exposing (Document)
+import Browser.Dom as Dom
 import Browser.Events as Events
 import Dict exposing (Dict)
 import Ecs.System as Ecs exposing (Focus, Id, System)
@@ -32,6 +33,7 @@ import Html
 import Html.Attributes as Attributes
 import Json.Decode as Decode
 import Random
+import Task
 
 
 main =
@@ -234,6 +236,7 @@ spriteForegroundColor sprite =
 type Model
     = Welcome
     | Playing PlayingData
+    | BetweenLevels BetweenLevelsData
     | GameWon Int
     | GameOver Int Level
 
@@ -244,9 +247,19 @@ type alias PlayingData =
     }
 
 
+type alias BetweenLevelsData =
+    { score : Int
+    , finishedLevel : Level
+    , remainingLevels : List Level
+    }
+
+
 init : {} -> ( Model, Cmd Msg )
 init _ =
-    ( Welcome, Cmd.none )
+    ( Welcome
+    , Dom.focus "start-button"
+        |> Task.attempt (\_ -> NoOp)
+    )
 
 
 
@@ -605,6 +618,9 @@ view model =
                         |> Maybe.map (viewLevel data.score)
                         |> Maybe.withDefault Element.none
 
+                BetweenLevels data ->
+                    viewBetweenLevels data
+
                 GameWon score ->
                     viewGameWon score
 
@@ -638,6 +654,7 @@ viewWelcome =
             , Border.width 2
             , Border.color (Element.rgb 0 0 0)
             , Background.color (Element.rgb 0 1 0)
+            , Element.htmlAttribute (Attributes.id "start-button")
             ]
             { onPress = Just StartClicked
             , label = Element.text "Start"
@@ -799,6 +816,49 @@ viewTile tileInfo system rowIndex columnIndex =
 
 
 
+-- BETWEEN LEVELS
+
+
+viewBetweenLevels : BetweenLevelsData -> Element Msg
+viewBetweenLevels data =
+    Element.el
+        [ Element.centerX
+        , Element.centerY
+        , Element.inFront <|
+            Element.column
+                [ Element.centerX
+                , Element.centerY
+                , Element.spacing 25
+                , Element.padding 15
+                , Border.width 2
+                , Border.color (Element.rgb 0 0 0)
+                , Background.color (Element.rgb 1 1 1)
+                ]
+                [ Element.el
+                    [ Element.centerX ]
+                    (Element.text "Very good!")
+                , Element.el
+                    [ Element.centerX ]
+                    (Element.text ("Score: " ++ String.fromInt data.score))
+                , Input.button
+                    [ Element.centerX
+                    , Element.centerY
+                    , Element.padding 10
+                    , Border.width 2
+                    , Border.color (Element.rgb 0 0 0)
+                    , Background.color (Element.rgb 0 1 0)
+                    , Element.htmlAttribute <|
+                        Attributes.id "next-level-button"
+                    ]
+                    { onPress = Just NextLevelClicked
+                    , label = Element.text "Next level"
+                    }
+                ]
+        ]
+        (viewSystem data.finishedLevel.width data.finishedLevel.height data.finishedLevel.system)
+
+
+
 -- GAME WON
 
 
@@ -822,6 +882,8 @@ viewGameWon score =
             , Border.width 2
             , Border.color (Element.rgb 0 0 0)
             , Background.color (Element.rgb 0 1 0)
+            , Element.htmlAttribute <|
+                Attributes.id "start-button"
             ]
             { onPress = Just StartAgainClicked
             , label = Element.text "Start again"
@@ -850,7 +912,7 @@ viewGameOver score level =
                 ]
                 [ Element.el
                     [ Element.centerX ]
-                    (Element.text "Gameover")
+                    (Element.text "Game over")
                 , Element.el
                     [ Element.centerX ]
                     (Element.text ("Score: " ++ String.fromInt score))
@@ -861,6 +923,8 @@ viewGameOver score level =
                     , Border.width 2
                     , Border.color (Element.rgb 0 0 0)
                     , Background.color (Element.rgb 0 1 0)
+                    , Element.htmlAttribute <|
+                        Attributes.id "start-button"
                     ]
                     { onPress = Just StartAgainClicked
                     , label = Element.text "Start again"
@@ -891,7 +955,9 @@ icon name =
 
 
 type Msg
-    = StartClicked
+    = NoOp
+    | StartClicked
+    | NextLevelClicked
       -- IN LEVEL
     | ArrowUpPressed
     | ArrowDownPressed
@@ -943,22 +1009,26 @@ update msg model =
 
                                 Lost levelScore ->
                                     ( GameOver (score + levelScore) newLevel
-                                    , Cmd.none
+                                    , Dom.focus "start-button"
+                                        |> Task.attempt (\_ -> NoOp)
                                     )
 
                                 Won levelScore ->
                                     case rest of
                                         [] ->
                                             ( GameWon (score + levelScore)
-                                            , Cmd.none
+                                            , Dom.focus "start-button"
+                                                |> Task.attempt (\_ -> NoOp)
                                             )
 
                                         _ ->
-                                            ( Playing
+                                            ( BetweenLevels
                                                 { score = score + levelScore
+                                                , finishedLevel = newLevel
                                                 , remainingLevels = rest
                                                 }
-                                            , Cmd.none
+                                            , Dom.focus "next-level-button"
+                                                |> Task.attempt (\_ -> NoOp)
                                             )
                     in
                     case msg of
@@ -976,6 +1046,19 @@ update msg model =
 
                         _ ->
                             ( model, Cmd.none )
+
+        BetweenLevels data ->
+            case msg of
+                NextLevelClicked ->
+                    ( Playing
+                        { score = data.score
+                        , remainingLevels = data.remainingLevels
+                        }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
 
         GameWon score ->
             case msg of
