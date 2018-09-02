@@ -127,6 +127,19 @@ normalizePosition width height position =
     }
 
 
+getPosition : Focus Store component -> System Store -> Maybe Position
+getPosition focus =
+    Ecs.with2 focus withPosition
+        >> List.head
+        >> Maybe.map (Tuple.second >> Tuple.second)
+
+
+getPositions : Focus Store component -> System Store -> List Position
+getPositions focus =
+    Ecs.with2 focus withPosition
+        >> List.map (Tuple.second >> Tuple.second)
+
+
 type alias Movement =
     { strategy : MovementStrategy }
 
@@ -432,9 +445,8 @@ l3 score =
                     List.isEmpty (Ecs.having withTrapper system)
 
                 trapperTrapped =
-                    Ecs.with2 withTrapper withPosition system
-                        |> List.head
-                        |> Maybe.map (Tuple.second >> Tuple.second)
+                    system
+                        |> getPosition withTrapper
                         |> Maybe.map
                             (\position ->
                                 List.isEmpty
@@ -813,8 +825,7 @@ computeTileInfo width height system =
                     rasterizeControl width height control position
                 )
             |> List.map (\position -> ( ( position.x, position.y ), hex "e05038" ))
-        , Ecs.with2 withPlayer withPosition system
-            |> List.map (Tuple.second >> Tuple.second)
+        , getPositions withPlayer system
             |> List.map (\position -> ( ( position.x, position.y ), hex "f2cbbc" ))
         ]
             |> List.concat
@@ -1263,35 +1274,32 @@ movePlayer width height deltaX deltaY system =
         enemies =
             Ecs.with2 withPosition withSwitcher system
                 |> List.map Tuple.second
+
+        move ( playerId, ( _, playerPosition ) ) =
+            let
+                newPlayerPosition =
+                    { playerPosition
+                        | x = playerPosition.x + deltaX
+                        , y = playerPosition.y + deltaY
+                    }
+
+                normalizedPlayerPosition =
+                    normalizePosition width height newPlayerPosition
+
+                playerActuallyMoved =
+                    newPlayerPosition == normalizedPlayerPosition
+            in
+            if controlledBySwitcher width height newPlayerPosition system then
+                Nothing
+            else if not playerActuallyMoved then
+                Nothing
+            else
+                Just <|
+                    Ecs.setComponent withPosition playerId normalizedPlayerPosition system
     in
     Ecs.with2 withPlayer withPosition system
         |> List.head
-        |> Maybe.andThen
-            (\( playerId, ( _, playerPosition ) ) ->
-                let
-                    newPlayerPosition =
-                        { playerPosition
-                            | x = playerPosition.x + deltaX
-                            , y = playerPosition.y + deltaY
-                        }
-
-                    normalizedPlayerPosition =
-                        normalizePosition width height newPlayerPosition
-
-                    playerActuallyMoved =
-                        newPlayerPosition == normalizedPlayerPosition
-                in
-                if controlledBySwitcher width height newPlayerPosition system then
-                    Nothing
-                else if not playerActuallyMoved then
-                    Nothing
-                else
-                    Just <|
-                        Ecs.setComponent withPosition
-                            playerId
-                            normalizedPlayerPosition
-                            system
-            )
+        |> Maybe.andThen move
 
 
 
@@ -1306,18 +1314,17 @@ fight system =
 
 fightEntity : ( Id, ( Fightable, Position ) ) -> System Store -> System Store
 fightEntity ( id, ( _, position ) ) system =
-    Maybe.withDefault system <|
-        Maybe.map
-            (\playerPosition ->
-                if position == playerPosition then
-                    removeEntity id system
-                else
-                    system
-            )
-            (Ecs.with2 withPlayer withPosition system
-                |> List.head
-                |> Maybe.map (Tuple.second >> Tuple.second)
-            )
+    let
+        removeHitEntity playerPosition =
+            if position == playerPosition then
+                removeEntity id system
+            else
+                system
+    in
+    system
+        |> getPosition withPlayer
+        |> Maybe.map removeHitEntity
+        |> Maybe.withDefault system
 
 
 
@@ -1337,20 +1344,17 @@ moveEntity width height ( id, ( movement, position ) ) system =
         obstacles =
             getObstructedPositions id system
 
-        playerPosition =
-            Ecs.with2 withPlayer withPosition system
-                |> List.head
-                |> Maybe.map (Tuple.second >> Tuple.second)
-    in
-    playerPosition
-        |> Maybe.map
-            (case movement.strategy of
+        move =
+            case movement.strategy of
                 Random ->
                     random width height obstacles position
 
                 MoveToPlayer ->
                     walkTo width height obstacles position
-            )
+    in
+    system
+        |> getPosition withPlayer
+        |> Maybe.map move
         |> Maybe.map
             (\newPosition ->
                 Ecs.setComponent withPosition id newPosition system
@@ -1375,24 +1379,20 @@ moveArcher width height ( id, ( archer, position ) ) system =
         obstacles =
             getObstructedPositions id system
 
-        playerPosition =
-            Ecs.with2 withPlayer withPosition system
-                |> List.head
-                |> Maybe.map (Tuple.second >> Tuple.second)
+        move playerPosition =
+            let
+                distanceToPlayer =
+                    min (abs (position.x - playerPosition.x))
+                        (abs (position.y - playerPosition.y))
+            in
+            if distanceToPlayer <= 1 then
+                random width height obstacles position playerPosition
+            else
+                walkTo width height obstacles position playerPosition
     in
-    playerPosition
-        |> Maybe.map
-            (\playerPosition_ ->
-                let
-                    distanceToPlayer =
-                        min (abs (position.x - playerPosition_.x))
-                            (abs (position.y - playerPosition_.y))
-                in
-                if distanceToPlayer <= 1 then
-                    random width height obstacles position playerPosition_
-                else
-                    walkTo width height obstacles position playerPosition_
-            )
+    system
+        |> getPosition withPlayer
+        |> Maybe.map move
         |> Maybe.map
             (\newPosition ->
                 Ecs.setComponent withPosition id newPosition system
@@ -1588,18 +1588,12 @@ stepSpawners system =
 
 
 stepSpawner : ( Id, ( Spawner, Position ) ) -> System Store -> System Store
-stepSpawner ( id, ( Spawner spawner, spawnerPosition ) ) system =
+stepSpawner ( id, ( Spawner spawner, spawnerPosition ) ) =
     if spawner.left > 0 then
-        Ecs.setComponent withSpawner
-            id
-            (Spawner { spawner | left = spawner.left - 1 })
-            system
+        Ecs.setComponent withSpawner id (Spawner { spawner | left = spawner.left - 1 })
     else
-        system
-            |> Ecs.setComponent withSpawner
-                id
-                (Spawner { spawner | left = spawner.interval })
-            |> spawner.spawn spawnerPosition
+        Ecs.setComponent withSpawner id (Spawner { spawner | left = spawner.interval })
+            >> spawner.spawn spawnerPosition
 
 
 
