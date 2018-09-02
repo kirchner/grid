@@ -265,19 +265,19 @@ spriteForegroundColor : Sprite -> Element.Color
 spriteForegroundColor sprite =
     case sprite of
         SwitcherSprite ->
-            Element.rgb 0 0 0
+            black
 
         TrapperSprite ->
-            Element.rgb 0 0 0
+            black
 
         ChessRookSprite ->
-            Element.rgb 0 0 0
+            black
 
         PlayerSprite ->
-            Element.rgb 0 0 0
+            black
 
         ArcherSprite ->
-            Element.rgb 0 0 0
+            black
 
 
 type Fightable
@@ -286,6 +286,118 @@ type Fightable
 
 type Archer
     = Archer
+
+
+
+---- ENTITIES
+
+
+spawnPlayer : Position -> System Store -> System Store
+spawnPlayer position system =
+    Ecs.spawnEntity
+        (\newId ->
+            Ecs.setComponent withPlayer newId Player
+                >> Ecs.setComponent withPosition newId position
+                >> Ecs.setComponent withSprite newId PlayerSprite
+        )
+        system
+
+
+
+-- ENEMIES
+
+
+spawnSwitcher : Position -> Switcher -> System Store -> System Store
+spawnSwitcher position switcher =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withSwitcher newId switcher
+                >> Ecs.setComponent withPosition newId position
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withMovement newId { strategy = MoveToPlayer }
+                >> Ecs.setComponent withControl newId SwitcherControl
+                >> Ecs.setComponent withSprite newId SwitcherSprite
+                >> Ecs.setComponent withFightable newId Fightable
+        )
+
+
+spawnChessRook : Position -> System Store -> System Store
+spawnChessRook position =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withPosition newId position
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withMovement newId { strategy = MoveToPlayer }
+                >> Ecs.setComponent withControl newId ChessRookControl
+                >> Ecs.setComponent withSprite newId ChessRookSprite
+                >> Ecs.setComponent withFightable newId Fightable
+        )
+
+
+spawnTrapper : Position -> Trapper -> System Store -> System Store
+spawnTrapper position trapper =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withTrapper newId trapper
+                >> Ecs.setComponent withPosition newId position
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withMovement newId { strategy = Random }
+                >> Ecs.setComponent withSprite newId TrapperSprite
+                >> Ecs.setComponent withFightable newId Fightable
+        )
+
+
+spawnMine : Position -> System Store -> System Store
+spawnMine position =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withMine newId Mine
+                >> Ecs.setComponent withPosition newId position
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withControl newId MineControl
+        )
+
+
+spawnSpawner : Position -> Spawner -> System Store -> System Store
+spawnSpawner position spawner =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withSpawner newId spawner
+                >> Ecs.setComponent withPosition newId position
+        )
+
+
+spawnRester : Int -> Int -> System Store -> System Store
+spawnRester x y =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withRester newId Rester
+                >> Ecs.setComponent withPosition newId (Position x y)
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withSprite newId SwitcherSprite
+                >> Ecs.setComponent withFightable newId Fightable
+        )
+
+
+
+-- OTHER
+
+
+spawnWall : Int -> Int -> System Store -> System Store
+spawnWall x y =
+    Ecs.spawnEntity
+        (\newId ->
+            identity
+                >> Ecs.setComponent withPosition newId (Position x y)
+                >> Ecs.setComponent withObstruction newId Obstruction
+                >> Ecs.setComponent withControl newId MineControl
+        )
 
 
 
@@ -569,134 +681,7 @@ isFinished width height score system =
 
 
 
----- SPAWNING
-
-
-spawnPlayer : Position -> System Store -> System Store
-spawnPlayer position system =
-    Ecs.spawnEntity
-        (\newId ->
-            Ecs.setComponent withPlayer newId Player
-                >> Ecs.setComponent withPosition newId position
-                >> Ecs.setComponent withSprite newId PlayerSprite
-        )
-        system
-
-
-spawnSwitcher : Position -> Switcher -> System Store -> System Store
-spawnSwitcher position switcher =
-    Ecs.spawnEntity
-        (\newId ->
-            identity
-                >> Ecs.setComponent withSwitcher newId switcher
-                >> Ecs.setComponent withPosition newId position
-                >> Ecs.setComponent withObstruction newId Obstruction
-                >> Ecs.setComponent withMovement newId { strategy = MoveToPlayer }
-                >> Ecs.setComponent withControl newId SwitcherControl
-                >> Ecs.setComponent withSprite newId SwitcherSprite
-                >> Ecs.setComponent withFightable newId Fightable
-        )
-
-
-spawnChessRook : Position -> System Store -> System Store
-spawnChessRook position =
-    Ecs.spawnEntity
-        (\newId ->
-            identity
-                >> Ecs.setComponent withPosition newId position
-                >> Ecs.setComponent withObstruction newId Obstruction
-                >> Ecs.setComponent withMovement newId { strategy = MoveToPlayer }
-                >> Ecs.setComponent withControl newId ChessRookControl
-                >> Ecs.setComponent withSprite newId ChessRookSprite
-                >> Ecs.setComponent withFightable newId Fightable
-        )
-
-
-spawnTrapper : Position -> Trapper -> System Store -> System Store
-spawnTrapper position trapper =
-    Ecs.spawnEntity
-        (\newId ->
-            identity
-                >> Ecs.setComponent withTrapper newId trapper
-                >> Ecs.setComponent withPosition newId position
-                >> Ecs.setComponent withObstruction newId Obstruction
-                >> Ecs.setComponent withMovement newId { strategy = Random }
-                >> Ecs.setComponent withSprite newId TrapperSprite
-                >> Ecs.setComponent withFightable newId Fightable
-        )
-
-
-spawnMine : Position -> System Store -> System Store
-spawnMine position =
-    Ecs.spawnEntity
-        (\newId ->
-            identity
-                >> Ecs.setComponent withMine newId Mine
-                >> Ecs.setComponent withPosition newId position
-                >> Ecs.setComponent withObstruction newId Obstruction
-                >> Ecs.setComponent withControl newId MineControl
-        )
-
-
-spawnSpawner : Position -> Spawner -> System Store -> System Store
-spawnSpawner position spawner =
-    Ecs.spawnEntity
-        (\newId ->
-            identity
-                >> Ecs.setComponent withSpawner newId spawner
-                >> Ecs.setComponent withPosition newId position
-        )
-
-
-spawnRester : Int -> Int -> System Store -> System Store
-spawnRester x y =
-    Ecs.spawnEntity
-        (\newId ->
-            identity
-                >> Ecs.setComponent withRester newId Rester
-                >> Ecs.setComponent withPosition newId (Position x y)
-                >> Ecs.setComponent withObstruction newId Obstruction
-                >> Ecs.setComponent withSprite newId SwitcherSprite
-                >> Ecs.setComponent withFightable newId Fightable
-        )
-
-
-spawnWall : Int -> Int -> System Store -> System Store
-spawnWall x y =
-    Ecs.spawnEntity
-        (\newId ->
-            identity
-                >> Ecs.setComponent withPosition newId (Position x y)
-                >> Ecs.setComponent withObstruction newId Obstruction
-                >> Ecs.setComponent withControl newId MineControl
-        )
-
-
-
 ---- VIEW
-
-
-hex string =
-    let
-        toInterval start end =
-            String.slice start end string
-                |> Hex.fromString
-                |> Result.toMaybe
-                |> Maybe.map (\int -> toFloat int / 255)
-                |> Maybe.withDefault 0
-    in
-    Element.rgb
-        (toInterval 0 2)
-        (toInterval 2 4)
-        (toInterval 4 6)
-
-
-red =
-    hex "e05038"
-
-
-yellow =
-    hex "e6af4b"
 
 
 view : Model -> Document Msg
@@ -762,17 +747,9 @@ viewWelcome =
             , Element.centerY
             ]
             (Element.text "Welcome!")
-        , Input.button
-            [ Element.centerX
-            , Element.centerY
-            , Element.padding 10
-            , Border.width 2
-            , Border.color (Element.rgb 0 0 0)
-            , Background.color red
-            , Element.htmlAttribute (Attributes.id "start-button")
-            ]
-            { onPress = Just StartClicked
-            , label = Element.text "Start"
+        , button "start-button"
+            { onPress = StartPressed
+            , label = "Start"
             }
         ]
 
@@ -783,28 +760,35 @@ viewWelcome =
 
 viewLevel : Int -> Level -> Element Msg
 viewLevel score { name, width, height, system, info } =
+    let
+        header =
+            Element.row
+                [ Element.width Element.fill ]
+                [ Element.el
+                    [ Element.alignLeft
+                    , Element.padding 5
+                    ]
+                    (Element.text ("Score: " ++ String.fromInt score))
+                , Element.el
+                    [ Element.alignRight
+                    , Element.padding 5
+                    , Font.italic
+                    ]
+                    (Element.text name)
+                ]
+
+        footer =
+            Element.el
+                [ Element.padding 5 ]
+                (Element.text info)
+    in
     Element.column
         [ Element.centerX
         , Element.centerY
         ]
-        [ Element.row
-            [ Element.width Element.fill ]
-            [ Element.el
-                [ Element.alignLeft
-                , Element.padding 5
-                ]
-                (Element.text ("Score: " ++ String.fromInt score))
-            , Element.el
-                [ Element.alignRight
-                , Element.padding 5
-                , Font.italic
-                ]
-                (Element.text name)
-            ]
+        [ header
         , viewSystem width height system
-        , Element.el
-            [ Element.padding 5 ]
-            (Element.text info)
+        , footer
         ]
 
 
@@ -818,12 +802,20 @@ type alias TileInfo =
 
 computeTileInfo : Int -> Int -> System Store -> TileInfo
 computeTileInfo width height system =
+    let
+        with2 focusA focusB f =
+            Ecs.with2 focusA focusB system
+                |> List.map
+                    (\( _, ( a, b ) ) ->
+                        f a b
+                    )
+
+        apply f ( spriteId, ( sprite, spritePosition ) ) =
+            ( ( spritePosition.x, spritePosition.y ), f sprite )
+    in
     { backgroundColors =
-        [ Ecs.with2 withControl withPosition system
-            |> List.concatMap
-                (\( controlId, ( control, position ) ) ->
-                    rasterizeControl width height control position
-                )
+        [ with2 withControl withPosition (rasterizeControl width height)
+            |> List.concat
             |> List.map (\position -> ( ( position.x, position.y ), hex "e05038" ))
         , getPositions withPlayer system
             |> List.map (\position -> ( ( position.x, position.y ), hex "f2cbbc" ))
@@ -832,33 +824,17 @@ computeTileInfo width height system =
             |> Dict.fromList
     , foregroundColors =
         Ecs.with2 withSprite withPosition system
-            |> List.map
-                (\( spriteId, ( sprite, spritePosition ) ) ->
-                    ( ( spritePosition.x, spritePosition.y ), spriteForegroundColor sprite )
-                )
+            |> List.map (apply spriteForegroundColor)
             |> Dict.fromList
     , icons =
         Ecs.with2 withSprite withPosition system
-            |> List.map
-                (\( spriteId, ( sprite, spritePosition ) ) ->
-                    ( ( spritePosition.x, spritePosition.y ), spriteIcon sprite )
-                )
+            |> List.map (apply spriteIcon)
             |> Dict.fromList
     , infos =
         [ Ecs.with2 withSwitcher withPosition system
-            |> List.map
-                (\( _, ( { left }, switcherPosition ) ) ->
-                    ( ( switcherPosition.x, switcherPosition.y )
-                    , String.fromInt left
-                    )
-                )
+            |> List.map (apply (.left >> String.fromInt))
         , Ecs.with2 withTrapper withPosition system
-            |> List.map
-                (\( _, ( { left }, trapperPosition ) ) ->
-                    ( ( trapperPosition.x, trapperPosition.y )
-                    , String.fromInt left
-                    )
-                )
+            |> List.map (apply (.left >> String.fromInt))
         ]
             |> List.concat
             |> Dict.fromList
@@ -869,7 +845,7 @@ viewSystem : Int -> Int -> System Store -> Element Msg
 viewSystem width height system =
     Element.column
         [ Border.width 1
-        , Border.color (Element.rgb 0 0 0)
+        , Border.color black
         ]
         (List.range 0 (height - 1)
             |> List.map (viewRow width height (computeTileInfo width height system) system)
@@ -888,25 +864,28 @@ viewTile : TileInfo -> System Store -> Int -> Int -> Element Msg
 viewTile tileInfo system rowIndex columnIndex =
     let
         backgroundColor =
-            Dict.get ( columnIndex, rowIndex ) tileInfo.backgroundColors
-                |> Maybe.withDefault (Element.rgb 1 1 1)
+            Dict.get position tileInfo.backgroundColors
+                |> Maybe.withDefault white
 
         foregroundColor =
-            Dict.get ( columnIndex, rowIndex ) tileInfo.foregroundColors
-                |> Maybe.withDefault (Element.rgb 0 0 0)
+            Dict.get position tileInfo.foregroundColors
+                |> Maybe.withDefault black
 
         iconName =
-            Dict.get ( columnIndex, rowIndex ) tileInfo.icons
+            Dict.get position tileInfo.icons
                 |> Maybe.withDefault ""
 
         info =
-            Dict.get ( columnIndex, rowIndex ) tileInfo.infos
+            Dict.get position tileInfo.infos
+
+        position =
+            ( columnIndex, rowIndex )
     in
     Element.el
         [ Element.width (Element.px 80)
         , Element.height (Element.px 80)
         , Border.width 1
-        , Border.color (Element.rgb 0 0 0)
+        , Border.color black
         , Font.color foregroundColor
         , Background.color backgroundColor
         , Element.above <|
@@ -938,36 +917,18 @@ viewBetweenLevels data =
     Element.el
         [ Element.centerX
         , Element.centerY
-        , Element.inFront <|
-            Element.column
-                [ Element.centerX
-                , Element.centerY
-                , Element.spacing 25
-                , Element.padding 15
-                , Border.width 2
-                , Border.color (Element.rgb 0 0 0)
-                , Background.color yellow
-                ]
-                [ Element.el
-                    [ Element.centerX ]
-                    (Element.text "Very good!")
-                , Element.el
-                    [ Element.centerX ]
-                    (Element.text ("Score: " ++ String.fromInt data.score))
-                , Input.button
-                    [ Element.centerX
-                    , Element.centerY
-                    , Element.padding 10
-                    , Border.width 2
-                    , Border.color (Element.rgb 0 0 0)
-                    , Background.color red
-                    , Element.htmlAttribute <|
-                        Attributes.id "next-level-button"
-                    ]
-                    { onPress = Just NextLevelClicked
-                    , label = Element.text "Next level"
-                    }
-                ]
+        , modal
+            [ Element.el
+                [ Element.centerX ]
+                (Element.text "Very good!")
+            , Element.el
+                [ Element.centerX ]
+                (Element.text ("Score: " ++ String.fromInt data.score))
+            , button "next-level-button"
+                { onPress = NextLevelPressed
+                , label = "Next level"
+                }
+            ]
         ]
         (viewSystem data.finishedLevel.width data.finishedLevel.height data.finishedLevel.system)
 
@@ -990,18 +951,9 @@ viewGameWon score =
         , Element.el
             [ Element.centerX ]
             (Element.text ("Score: " ++ String.fromInt score))
-        , Input.button
-            [ Element.centerX
-            , Element.centerY
-            , Element.padding 10
-            , Border.width 2
-            , Border.color (Element.rgb 0 0 0)
-            , Background.color red
-            , Element.htmlAttribute <|
-                Attributes.id "start-button"
-            ]
-            { onPress = Just StartAgainClicked
-            , label = Element.text "Start again"
+        , button "start-button"
+            { onPress = StartAgainPressed
+            , label = "Start again"
             }
         ]
 
@@ -1015,42 +967,55 @@ viewGameOver score level =
     Element.el
         [ Element.centerX
         , Element.centerY
-        , Element.inFront <|
-            Element.column
-                [ Element.centerX
-                , Element.centerY
-                , Element.spacing 25
-                , Element.padding 15
-                , Border.width 2
-                , Border.color (Element.rgb 0 0 0)
-                , Background.color yellow
-                ]
-                [ Element.el
-                    [ Element.centerX ]
-                    (Element.text "Game over")
-                , Element.el
-                    [ Element.centerX ]
-                    (Element.text ("Score: " ++ String.fromInt score))
-                , Input.button
-                    [ Element.centerX
-                    , Element.centerY
-                    , Element.padding 10
-                    , Border.width 2
-                    , Border.color (Element.rgb 0 0 0)
-                    , Background.color red
-                    , Element.htmlAttribute <|
-                        Attributes.id "start-button"
-                    ]
-                    { onPress = Just StartAgainClicked
-                    , label = Element.text "Start again"
-                    }
-                ]
+        , modal
+            [ Element.el
+                [ Element.centerX ]
+                (Element.text "Game over")
+            , Element.el
+                [ Element.centerX ]
+                (Element.text ("Score: " ++ String.fromInt score))
+            , button "start-button"
+                { onPress = StartAgainPressed
+                , label = "Start again"
+                }
+            ]
         ]
         (viewSystem level.width level.height level.system)
 
 
 
 -- HELPER
+
+
+modal : List (Element msg) -> Element.Attribute msg
+modal elements =
+    Element.inFront <|
+        Element.column
+            [ Element.centerX
+            , Element.centerY
+            , Element.spacing 25
+            , Element.padding 15
+            , Border.width 2
+            , Border.color black
+            , Background.color yellow
+            ]
+            elements
+
+
+button : String -> { onPress : msg, label : String } -> Element msg
+button id { onPress, label } =
+    Input.button
+        [ Element.centerX
+        , Element.centerY
+        , Element.padding 10
+        , Border.width 2
+        , Border.color black
+        , Background.color red
+        , Element.htmlAttribute (Attributes.id id)
+        ]
+        { onPress = Just onPress
+        , label = Element.text label
+        }
 
 
 icon : String -> Element msg
@@ -1065,21 +1030,57 @@ icon name =
             []
 
 
+hex : String -> Element.Color
+hex string =
+    let
+        toInterval start end =
+            String.slice start end string
+                |> Hex.fromString
+                |> Result.toMaybe
+                |> Maybe.map (\int -> toFloat int / 255)
+                |> Maybe.withDefault 0
+    in
+    Element.rgb
+        (toInterval 0 2)
+        (toInterval 2 4)
+        (toInterval 4 6)
+
+
+red : Element.Color
+red =
+    hex "e05038"
+
+
+yellow : Element.Color
+yellow =
+    hex "e6af4b"
+
+
+black : Element.Color
+black =
+    Element.rgb 0 0 0
+
+
+white : Element.Color
+white =
+    Element.rgb 1 1 1
+
+
 
 ---- UPDATE
 
 
 type Msg
     = NoOp
-    | StartClicked
-    | NextLevelClicked
+    | StartPressed
+    | NextLevelPressed
       -- IN LEVEL
     | ArrowUpPressed
     | ArrowDownPressed
     | ArrowLeftPressed
     | ArrowRightPressed
       -- GAME WON/OVER
-    | StartAgainClicked
+    | StartAgainPressed
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -1087,7 +1088,7 @@ update msg model =
     case model of
         Welcome ->
             case msg of
-                StartClicked ->
+                StartPressed ->
                     ( Playing
                         { score = 0
                         , remainingLevels = allLevels
@@ -1164,7 +1165,7 @@ update msg model =
 
         BetweenLevels data ->
             case msg of
-                NextLevelClicked ->
+                NextLevelPressed ->
                     ( Playing
                         { score = data.score
                         , remainingLevels = data.remainingLevels
@@ -1177,7 +1178,7 @@ update msg model =
 
         GameWon score ->
             case msg of
-                StartAgainClicked ->
+                StartAgainPressed ->
                     ( Playing
                         { score = 0
                         , remainingLevels = allLevels
@@ -1190,7 +1191,7 @@ update msg model =
 
         GameOver score _ ->
             case msg of
-                StartAgainClicked ->
+                StartAgainPressed ->
                     ( Playing
                         { score = 0
                         , remainingLevels = allLevels
