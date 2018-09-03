@@ -1209,7 +1209,7 @@ update msg model =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    Events.onKeyPress
+    Events.onKeyDown
         (Decode.field "key" Decode.string
             |> Decode.andThen
                 (\key ->
