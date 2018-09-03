@@ -24,7 +24,7 @@ import Browser.Dom as Dom
 import Browser.Events as Events
 import Dict exposing (Dict)
 import Ecs.System as Ecs exposing (Focus, Id, System)
-import Element exposing (Element)
+import Element exposing (Device, DeviceClass(..), Element, Orientation(..))
 import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
@@ -404,7 +404,92 @@ spawnWall x y =
 ---- MODEL
 
 
-type Model
+type alias Model =
+    { windowWidth : Int
+    , windowHeight : Int
+    , gameModel : GameModel
+    }
+
+
+init : { width : Int, height : Int } -> ( Model, Cmd Msg )
+init { width, height } =
+    let
+        ( gameModel, gameCmd ) =
+            gameInit
+    in
+    ( { windowWidth = width
+      , windowHeight = height
+      , gameModel = gameModel
+      }
+    , Cmd.map GameMsg gameCmd
+    )
+
+
+
+---- VIEW
+
+
+view : Model -> Document Msg
+view model =
+    let
+        { title, body } =
+            gameView model.windowWidth model.windowHeight device model.gameModel
+
+        device =
+            Element.classifyDevice
+                { width = model.windowWidth
+                , height = model.windowHeight
+                }
+    in
+    { title = title
+    , body = List.map (Html.map GameMsg) body
+    }
+
+
+
+---- UPDATE
+
+
+type Msg
+    = WindowResized Int Int
+    | GameMsg GameMsg
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        GameMsg gameMsg ->
+            let
+                ( newGameModel, gameCmd ) =
+                    gameUpdate gameMsg model.gameModel
+            in
+            ( { model | gameModel = newGameModel }
+            , Cmd.map GameMsg gameCmd
+            )
+
+        WindowResized width height ->
+            ( { model | windowWidth = width, windowHeight = height }
+            , Cmd.none
+            )
+
+
+
+---- SUBSCRIPTIONS
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    Sub.batch
+        [ Events.onResize WindowResized
+        , Sub.map GameMsg (gameSubscriptions model.gameModel)
+        ]
+
+
+
+---- GAME
+
+
+type GameModel
     = Welcome
     | Playing PlayingData
     | BetweenLevels BetweenLevelsData
@@ -425,8 +510,8 @@ type alias BetweenLevelsData =
     }
 
 
-init : {} -> ( Model, Cmd Msg )
-init _ =
+gameInit : ( GameModel, Cmd GameMsg )
+gameInit =
     ( Welcome
     , Dom.focus "start-button"
         |> Task.attempt (\_ -> NoOp)
@@ -684,8 +769,8 @@ isFinished width height score system =
 ---- VIEW
 
 
-view : Model -> Document Msg
-view model =
+gameView : Int -> Int -> Device -> GameModel -> Document GameMsg
+gameView windowWidth windowHeight device model =
     { title = "grid"
     , body =
         [ Element.layoutWith
@@ -706,7 +791,13 @@ view model =
                     }
                 , Font.sansSerif
                 ]
-            , Font.size 32
+            , Font.size <|
+                case device.class of
+                    Phone ->
+                        28
+
+                    _ ->
+                        32
             , Background.color yellow
             ]
             (case model of
@@ -715,17 +806,17 @@ view model =
 
                 Playing data ->
                     List.head data.remainingLevels
-                        |> Maybe.map (viewLevel data.score)
+                        |> Maybe.map (viewLevel windowWidth windowHeight device data.score)
                         |> Maybe.withDefault Element.none
 
                 BetweenLevels data ->
-                    viewBetweenLevels data
+                    viewBetweenLevels windowWidth windowHeight device data
 
                 GameWon score ->
                     viewGameWon score
 
                 GameOver score level ->
-                    viewGameOver score level
+                    viewGameOver windowWidth windowHeight device score level
             )
         ]
     }
@@ -735,7 +826,7 @@ view model =
 -- WELCOME
 
 
-viewWelcome : Element Msg
+viewWelcome : Element GameMsg
 viewWelcome =
     Element.column
         [ Element.width Element.fill
@@ -758,8 +849,8 @@ viewWelcome =
 -- IN LEVEL
 
 
-viewLevel : Int -> Level -> Element Msg
-viewLevel score { name, width, height, system, info } =
+viewLevel : Int -> Int -> Device -> Int -> Level -> Element GameMsg
+viewLevel windowWidth windowHeight device score { name, width, height, system, info } =
     let
         header =
             Element.row
@@ -768,28 +859,125 @@ viewLevel score { name, width, height, system, info } =
                     [ Element.alignLeft
                     , Element.padding 5
                     ]
-                    (Element.text ("Score: " ++ String.fromInt score))
+                    scoreText
                 , Element.el
                     [ Element.alignRight
                     , Element.padding 5
                     , Font.italic
                     ]
-                    (Element.text name)
+                    title
                 ]
 
         footer =
             Element.el
                 [ Element.padding 5 ]
                 (Element.text info)
+
+        sidebar =
+            Element.column
+                [ Element.height Element.fill
+                , Element.width Element.fill
+                ]
+                [ Element.el
+                    [ Element.centerX
+                    , Element.padding 5
+                    , Font.italic
+                    ]
+                    title
+                , Element.el
+                    [ Element.centerX
+                    , Element.centerY
+                    ]
+                    verticalControls
+                , Element.el
+                    [ Element.centerX
+                    , Element.alignBottom
+                    , Element.padding 5
+                    ]
+                    scoreText
+                ]
+
+        verticalControls =
+            Element.column
+                [ Element.spacing 10
+                ]
+                [ iconButton ArrowUpPressed "caret-up"
+                , iconButton ArrowLeftPressed "caret-left"
+                , iconButton ArrowRightPressed "caret-right"
+                , iconButton ArrowDownPressed "caret-down"
+                ]
+
+        horizontalControls =
+            Element.row
+                [ Element.spacing 10
+                ]
+                [ iconButton ArrowLeftPressed "caret-left"
+                , iconButton ArrowUpPressed "caret-up"
+                , iconButton ArrowDownPressed "caret-down"
+                , iconButton ArrowRightPressed "caret-right"
+                ]
+
+        iconButton onPress label =
+            Input.button
+                [ Element.centerX
+                , Element.centerY
+                , Element.padding 10
+                , Element.width (Element.px 50)
+                , Element.height (Element.px 50)
+                , Background.color red
+                , Border.rounded 5
+                , Border.width 2
+                ]
+                { onPress = Just onPress
+                , label = icon label
+                }
+
+        title =
+            Element.text name
+
+        scoreText =
+            Element.text ("Score: " ++ String.fromInt score)
     in
-    Element.column
-        [ Element.centerX
-        , Element.centerY
-        ]
-        [ header
-        , viewSystem width height system
-        , footer
-        ]
+    case device.class of
+        Phone ->
+            case device.orientation of
+                Portrait ->
+                    Element.column
+                        [ Element.width Element.fill
+                        , Element.height Element.fill
+                        ]
+                        [ header
+                        , Element.el
+                            [ Element.centerY
+                            , Element.width Element.fill
+                            ]
+                            (viewSystem windowWidth windowHeight device width height system)
+                        , Element.el
+                            [ Element.alignBottom
+                            , Element.centerX
+                            , Element.padding 20
+                            ]
+                            horizontalControls
+                        ]
+
+                Landscape ->
+                    Element.row
+                        [ Element.width Element.fill
+                        , Element.height Element.fill
+                        ]
+                        [ viewSystem windowWidth windowHeight device width height system
+                        , sidebar
+                        ]
+
+        _ ->
+            Element.column
+                [ Element.centerX
+                , Element.centerY
+                ]
+                [ header
+                , viewSystem windowWidth windowHeight device width height system
+                , footer
+                ]
 
 
 type alias TileInfo =
@@ -841,27 +1029,76 @@ computeTileInfo width height system =
     }
 
 
-viewSystem : Int -> Int -> System Store -> Element Msg
-viewSystem width height system =
+viewSystem : Int -> Int -> Device -> Int -> Int -> System Store -> Element GameMsg
+viewSystem windowWidth windowHeight device width height system =
     Element.column
         [ Border.width 1
         , Border.color black
+        , Element.width <|
+            case ( device.class, device.orientation ) of
+                ( Phone, Portrait ) ->
+                    Element.fill
+
+                _ ->
+                    Element.shrink
+        , Element.height <|
+            case ( device.class, device.orientation ) of
+                ( Phone, Landscape ) ->
+                    Element.fill
+
+                _ ->
+                    Element.shrink
         ]
         (List.range 0 (height - 1)
-            |> List.map (viewRow width height (computeTileInfo width height system) system)
+            |> List.map
+                (viewRow
+                    windowWidth
+                    windowHeight
+                    device
+                    width
+                    height
+                    (computeTileInfo width height system)
+                    system
+                )
         )
 
 
-viewRow : Int -> Int -> TileInfo -> System Store -> Int -> Element Msg
-viewRow width height tileInfo system rowIndex =
-    Element.row []
+viewRow : Int -> Int -> Device -> Int -> Int -> TileInfo -> System Store -> Int -> Element GameMsg
+viewRow windowWidth windowHeight device width height tileInfo system rowIndex =
+    let
+        tileWidth =
+            case device.class of
+                Phone ->
+                    case device.orientation of
+                        Portrait ->
+                            windowWidth // width - 1
+
+                        Landscape ->
+                            windowHeight // height - 1
+
+                _ ->
+                    80
+    in
+    Element.row
+        (case device.class of
+            Phone ->
+                case device.orientation of
+                    Portrait ->
+                        [ Element.width Element.fill ]
+
+                    Landscape ->
+                        [ Element.height Element.fill ]
+
+            _ ->
+                []
+        )
         (List.range 0 (width - 1)
-            |> List.map (viewTile tileInfo system rowIndex)
+            |> List.map (viewTile tileWidth device tileInfo system rowIndex)
         )
 
 
-viewTile : TileInfo -> System Store -> Int -> Int -> Element Msg
-viewTile tileInfo system rowIndex columnIndex =
+viewTile : Int -> Device -> TileInfo -> System Store -> Int -> Int -> Element GameMsg
+viewTile tileWidth device tileInfo system rowIndex columnIndex =
     let
         backgroundColor =
             Dict.get position tileInfo.backgroundColors
@@ -880,10 +1117,31 @@ viewTile tileInfo system rowIndex columnIndex =
 
         position =
             ( columnIndex, rowIndex )
+
+        ( actualTileWidth, actualTileHeight ) =
+            case device.class of
+                Phone ->
+                    case device.orientation of
+                        Portrait ->
+                            ( Element.fill
+                                |> Element.minimum tileWidth
+                            , Element.px tileWidth
+                            )
+
+                        Landscape ->
+                            ( Element.px tileWidth
+                            , Element.fill
+                                |> Element.minimum tileWidth
+                            )
+
+                _ ->
+                    ( Element.px tileWidth
+                    , Element.px tileWidth
+                    )
     in
     Element.el
-        [ Element.width (Element.px 80)
-        , Element.height (Element.px 80)
+        [ Element.width actualTileWidth
+        , Element.height actualTileHeight
         , Border.width 1
         , Border.color black
         , Font.color foregroundColor
@@ -912,32 +1170,59 @@ viewTile tileInfo system rowIndex columnIndex =
 -- BETWEEN LEVELS
 
 
-viewBetweenLevels : BetweenLevelsData -> Element Msg
-viewBetweenLevels data =
-    Element.el
-        [ Element.centerX
-        , Element.centerY
-        , modal
-            [ Element.el
-                [ Element.centerX ]
-                (Element.text "Very good!")
-            , Element.el
-                [ Element.centerX ]
-                (Element.text ("Score: " ++ String.fromInt data.score))
-            , button "next-level-button"
-                { onPress = NextLevelPressed
-                , label = "Next level"
-                }
-            ]
-        ]
-        (viewSystem data.finishedLevel.width data.finishedLevel.height data.finishedLevel.system)
+viewBetweenLevels : Int -> Int -> Device -> BetweenLevelsData -> Element GameMsg
+viewBetweenLevels windowWidth windowHeight device data =
+    case device.class of
+        Phone ->
+            Element.column
+                [ Element.centerY
+                , Element.centerX
+                , Element.spacing 25
+                ]
+                [ Element.el
+                    [ Element.centerX ]
+                    (Element.text "Very good!")
+                , Element.el
+                    [ Element.centerX ]
+                    (Element.text ("Score: " ++ String.fromInt data.score))
+                , button "next-level-button"
+                    { onPress = NextLevelPressed
+                    , label = "Next level"
+                    }
+                ]
+
+        _ ->
+            Element.el
+                [ Element.centerX
+                , Element.centerY
+                , modal
+                    [ Element.el
+                        [ Element.centerX ]
+                        (Element.text "Very good!")
+                    , Element.el
+                        [ Element.centerX ]
+                        (Element.text ("Score: " ++ String.fromInt data.score))
+                    , button "next-level-button"
+                        { onPress = NextLevelPressed
+                        , label = "Next level"
+                        }
+                    ]
+                ]
+                (viewSystem
+                    windowWidth
+                    windowHeight
+                    device
+                    data.finishedLevel.width
+                    data.finishedLevel.height
+                    data.finishedLevel.system
+                )
 
 
 
 -- GAME WON
 
 
-viewGameWon : Int -> Element Msg
+viewGameWon : Int -> Element GameMsg
 viewGameWon score =
     Element.column
         [ Element.centerX
@@ -962,25 +1247,45 @@ viewGameWon score =
 -- GAME OVER
 
 
-viewGameOver : Int -> Level -> Element Msg
-viewGameOver score level =
-    Element.el
-        [ Element.centerX
-        , Element.centerY
-        , modal
-            [ Element.el
-                [ Element.centerX ]
-                (Element.text "Game over")
-            , Element.el
-                [ Element.centerX ]
-                (Element.text ("Score: " ++ String.fromInt score))
-            , button "start-button"
-                { onPress = StartAgainPressed
-                , label = "Start again"
-                }
-            ]
-        ]
-        (viewSystem level.width level.height level.system)
+viewGameOver : Int -> Int -> Device -> Int -> Level -> Element GameMsg
+viewGameOver windowWidth windowHeight device score level =
+    case device.class of
+        Phone ->
+            Element.column
+                [ Element.centerY
+                , Element.centerX
+                , Element.spacing 25
+                ]
+                [ Element.el
+                    [ Element.centerX ]
+                    (Element.text "Game over")
+                , Element.el
+                    [ Element.centerX ]
+                    (Element.text ("Score: " ++ String.fromInt score))
+                , button "start-button"
+                    { onPress = StartAgainPressed
+                    , label = "Start again"
+                    }
+                ]
+
+        _ ->
+            Element.el
+                [ Element.centerX
+                , Element.centerY
+                , modal
+                    [ Element.el
+                        [ Element.centerX ]
+                        (Element.text "Game over")
+                    , Element.el
+                        [ Element.centerX ]
+                        (Element.text ("Score: " ++ String.fromInt score))
+                    , button "start-button"
+                        { onPress = StartAgainPressed
+                        , label = "Start again"
+                        }
+                    ]
+                ]
+                (viewSystem windowWidth windowHeight device level.width level.height level.system)
 
 
 
@@ -1070,7 +1375,7 @@ white =
 ---- UPDATE
 
 
-type Msg
+type GameMsg
     = NoOp
     | StartPressed
     | NextLevelPressed
@@ -1083,8 +1388,8 @@ type Msg
     | StartAgainPressed
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+gameUpdate : GameMsg -> GameModel -> ( GameModel, Cmd GameMsg )
+gameUpdate msg model =
     case model of
         Welcome ->
             case msg of
@@ -1207,8 +1512,8 @@ update msg model =
 ---- SUBSCRIPTIONS
 
 
-subscriptions : Model -> Sub Msg
-subscriptions model =
+gameSubscriptions : GameModel -> Sub GameMsg
+gameSubscriptions model =
     Events.onKeyDown
         (Decode.field "key" Decode.string
             |> Decode.andThen
