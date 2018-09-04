@@ -1,6 +1,15 @@
 {
+  "background_color": "black",
+  "description": "a simple game written in Elm",
+  "display": "fullscreen",
+  "icons": [
+    {
+      "src": "frog-solid.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ],
   "name": "grid",
-  "icons": [],
-  "start_url": ".",
-  "display": "fullscreen"
+  "short_name": "grid",
+  "start_url": "/index.html"
 }
