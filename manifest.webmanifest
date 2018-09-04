@@ -1,6 +1,6 @@
 {
   "name": "grid",
   "icons": [],
-  "start_uri": ".",
-  "display": "standalone"
+  "start_url": ".",
+  "display": "fullscreen"
 }
