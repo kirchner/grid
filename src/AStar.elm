@@ -1,9 +1,14 @@
 module AStar
     exposing
         ( Config
-        , Node
         , compute
         )
+
+{-|
+
+@docs compute, Config
+
+-}
 
 {-
 
@@ -27,35 +32,17 @@ import Dict exposing (Dict)
 import Set exposing (Set)
 
 
-type alias Node =
-    ( Int, Int )
-
-
-type alias StarState =
-    { closedSet : Set Node
-    , openSet : Set Node
-    , fScore : Dict Node Float
-    , gScore : Dict Node Float
-    , cameFrom : Dict Node Node
+{-| TODO
+-}
+type alias Config comparable =
+    { heuristicCostEstimate : comparable -> comparable -> Float
+    , neighbours : comparable -> List comparable
     }
 
 
-type Step
-    = Loop StarState
-    | Done
-        { cameFrom : Dict Node Node
-        , current : Node
-        }
-    | Impossible
-
-
-type alias Config =
-    { heuristicCostEstimate : Node -> Node -> Float
-    , neighbours : Node -> List Node
-    }
-
-
-compute : Config -> Node -> Node -> Maybe (List Node)
+{-| TODO
+-}
+compute : Config comparable -> comparable -> comparable -> Maybe (List comparable)
 compute config start goal =
     let
         initialState =
@@ -70,22 +57,32 @@ compute config start goal =
         |> Maybe.map reconstructPath
 
 
-reconstructPath : { cameFrom : Dict Node Node, current : Node } -> List Node
-reconstructPath { cameFrom, current } =
-    reconstructPathHelp [ current ] cameFrom current
+
+---- ASTAR
 
 
-reconstructPathHelp : List Node -> Dict Node Node -> Node -> List Node
-reconstructPathHelp path cameFrom current =
-    case Dict.get current cameFrom of
-        Nothing ->
-            path
+type alias StarState comparable =
+    { closedSet : Set comparable
+    , openSet : Set comparable
+    , fScore : Dict comparable Float
+    , gScore : Dict comparable Float
+    , cameFrom : Dict comparable comparable
+    }
 
-        Just next ->
-            reconstructPathHelp (next :: path) cameFrom next
+
+type Step comparable
+    = Loop (StarState comparable)
+    | Done (DoneData comparable)
+    | Impossible
 
 
-loop : Config -> Node -> Step -> Maybe { cameFrom : Dict Node Node, current : Node }
+type alias DoneData comparable =
+    { cameFrom : Dict comparable comparable
+    , current : comparable
+    }
+
+
+loop : Config comparable -> comparable -> Step comparable -> Maybe (DoneData comparable)
 loop config goal step =
     case step of
         Done data ->
@@ -98,84 +95,124 @@ loop config goal step =
             loop config goal (iterate config goal newState)
 
 
-iterate : Config -> Node -> StarState -> Step
-iterate { neighbours, heuristicCostEstimate } goal ({ closedSet, openSet, fScore, gScore, cameFrom } as state) =
-    case
-        openSet
-            |> Set.toList
-            |> List.map
-                (\node ->
-                    ( node
-                    , Dict.get node fScore
-                        |> Maybe.withDefault (1 / 0)
-                    )
-                )
-            |> List.sortBy Tuple.second
-            |> List.head
-    of
+iterate : Config comparable -> comparable -> StarState comparable -> Step comparable
+iterate config goal state =
+    let
+        { openSet, fScore, cameFrom } =
+            state
+
+        maybeCurrent =
+            openSet
+                |> Set.toList
+                |> List.map attachFScore
+                |> List.sortBy Tuple.second
+                |> List.head
+
+        attachFScore node =
+            ( node, valueOrInfinity node fScore )
+    in
+    case maybeCurrent of
         Nothing ->
             Impossible
 
         Just ( current, currentFScore ) ->
             if current == goal then
-                Done
-                    { cameFrom = cameFrom
-                    , current = current
-                    }
+                Done (DoneData cameFrom current)
             else
-                let
-                    notInClosed node =
-                        not (Set.member node closedSet)
+                Loop (checkNeighbours config goal current state)
 
-                    folder neighbour intermediateState =
-                        let
-                            tentativeGScore =
-                                Dict.get current gScore
-                                    |> Maybe.map ((+) 1)
-                                    |> Maybe.withDefault (1 / 0)
 
-                            neighbourGScore =
-                                Dict.get current gScore
-                                    |> Maybe.withDefault (1 / 0)
+checkNeighbours :
+    Config comparable
+    -> comparable
+    -> comparable
+    -> StarState comparable
+    -> StarState comparable
+checkNeighbours { neighbours, heuristicCostEstimate } goal current state =
+    let
+        { closedSet, openSet } =
+            state
+    in
+    List.foldl (checkNeighbour heuristicCostEstimate goal current)
+        { state
+            | openSet = Set.remove current openSet
+            , closedSet = Set.insert current closedSet
+        }
+        (neighbours current)
 
-                            newCameFrom =
-                                Dict.insert neighbour
-                                    current
-                                    intermediateState.cameFrom
 
-                            newGScore =
-                                Dict.insert neighbour
-                                    tentativeGScore
-                                    intermediateState.gScore
+checkNeighbour :
+    (comparable -> comparable -> Float)
+    -> comparable
+    -> comparable
+    -> comparable
+    -> StarState comparable
+    -> StarState comparable
+checkNeighbour heuristicCostEstimate goal current neighbour state =
+    let
+        { closedSet, openSet, fScore, gScore, cameFrom } =
+            state
 
-                            newFScore =
-                                Dict.insert neighbour
-                                    (tentativeGScore + heuristicCostEstimate goal neighbour)
-                                    intermediateState.fScore
-                        in
-                        if Set.member neighbour closedSet then
-                            intermediateState
-                        else if not (Set.member neighbour intermediateState.openSet) then
-                            { intermediateState
-                                | openSet = Set.insert neighbour intermediateState.openSet
-                                , cameFrom = newCameFrom
-                                , gScore = newGScore
-                                , fScore = newFScore
-                            }
-                        else if tentativeGScore >= neighbourGScore then
-                            intermediateState
-                        else
-                            { intermediateState
-                                | cameFrom = newCameFrom
-                                , gScore = newGScore
-                                , fScore = newFScore
-                            }
-                in
-                Loop
-                    (neighbours current
-                        |> List.foldl folder
-                            { state
-                                | openSet = Set.remove current openSet
-                                , closedSet = Set.insert current closedSet
-                            }
-                    )
+        tentativeGScore =
+            1 + neighbourGScore
+
+        neighbourGScore =
+            valueOrInfinity current gScore
+
+        alreadyChecked =
+            Set.member neighbour closedSet
+
+        notCheckedYet =
+            not (Set.member neighbour openSet)
+
+        worseGScore =
+            tentativeGScore >= neighbourGScore
+    in
+    if alreadyChecked then
+        state
+    else if notCheckedYet then
+        { state
+            | openSet = Set.insert neighbour openSet
+            , cameFrom = Dict.insert neighbour current cameFrom
+            , gScore = Dict.insert neighbour tentativeGScore gScore
+            , fScore =
+                Dict.insert neighbour
+                    (tentativeGScore + heuristicCostEstimate goal neighbour)
+                    fScore
+        }
+    else if worseGScore then
+        state
+    else
+        { state
+            | cameFrom = Dict.insert neighbour current cameFrom
+            , gScore = Dict.insert neighbour tentativeGScore gScore
+            , fScore =
+                Dict.insert neighbour
+                    (tentativeGScore + heuristicCostEstimate goal neighbour)
+                    fScore
+        }
+
+
+valueOrInfinity : comparable -> Dict comparable Float -> Float
+valueOrInfinity key dict =
+    Dict.get key dict
+        |> Maybe.withDefault (0 / 1)
+
+
+
+---- RECONSTRUCT PATH
+
+
+reconstructPath : DoneData comparable -> List comparable
+reconstructPath { cameFrom, current } =
+    reconstructPathHelp [ current ] cameFrom current
+
+
+reconstructPathHelp : List comparable -> Dict comparable comparable -> comparable -> List comparable
+reconstructPathHelp path cameFrom current =
+    case Dict.get current cameFrom of
+        Nothing ->
+            path
+
+        Just next ->
+            reconstructPathHelp (next :: path) cameFrom next

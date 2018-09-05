@@ -1760,11 +1760,8 @@ walkTo :
 walkTo width height obstacles position playerPosition =
     let
         maybeNewPosition =
-            AStar.compute (aStarConfig width height obstacles)
-                ( position.x, position.y )
-                ( playerPosition.x, playerPosition.y )
+            aStarCompute width height obstacles position playerPosition
                 |> Maybe.andThen (List.drop 1 >> List.head)
-                |> Maybe.map positionFromTuple
     in
     case maybeNewPosition of
         Nothing ->
@@ -1790,7 +1787,7 @@ controlledBySwitcher width height position system =
     List.member position controlledPositions
 
 
-aStarConfig : Int -> Int -> List Position -> AStar.Config
+aStarConfig : Int -> Int -> List Position -> AStar.Config ( Int, Int )
 aStarConfig width height obstacles =
     { heuristicCostEstimate =
         \goal current ->
@@ -1799,6 +1796,14 @@ aStarConfig width height obstacles =
                     + ((Tuple.second goal - Tuple.second current) ^ 2)
     , neighbours = neighbours width height obstacles
     }
+
+
+aStarCompute : Int -> Int -> List Position -> Position -> Position -> Maybe (List Position)
+aStarCompute width height obstacles startPosition goalPosition =
+    AStar.compute (aStarConfig width height obstacles)
+        ( startPosition.x, startPosition.y )
+        ( goalPosition.x, goalPosition.y )
+        |> Maybe.map (List.map positionFromTuple)
 
 
 neighbours : Int -> Int -> List Position -> ( Int, Int ) -> List ( Int, Int )
