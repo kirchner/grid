@@ -1,4 +1,4 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 {-
 
@@ -19,9 +19,6 @@ module Main exposing (main)
 -}
 
 import AStar
-import Browser exposing (Document)
-import Browser.Dom as Dom
-import Browser.Events as Events
 import Dict exposing (Dict)
 import Ecs.System as Ecs exposing (Focus, Id, System)
 import Element exposing (Device, DeviceClass(..), Element, Orientation(..))
@@ -32,15 +29,14 @@ import Element.Input as Input
 import Hex
 import Html
 import Html.Attributes as Attributes
-import Json.Decode as Decode
-import Random
+import Json.Decode as Decode exposing (Value)
+import Random exposing (Generator)
 import Task
 
 
 main =
-    Browser.document
+    Platform.worker
         { init = init
-        , view = view
         , update = update
         , subscriptions = subscriptions
         }
@@ -242,44 +238,6 @@ type Sprite
     | ArcherSprite
 
 
-spriteIcon : Sprite -> String
-spriteIcon sprite =
-    case sprite of
-        SwitcherSprite ->
-            "dove"
-
-        TrapperSprite ->
-            "kiwi-bird"
-
-        ChessRookSprite ->
-            "chess-rook"
-
-        PlayerSprite ->
-            "frog"
-
-        ArcherSprite ->
-            "feather"
-
-
-spriteForegroundColor : Sprite -> Element.Color
-spriteForegroundColor sprite =
-    case sprite of
-        SwitcherSprite ->
-            black
-
-        TrapperSprite ->
-            black
-
-        ChessRookSprite ->
-            black
-
-        PlayerSprite ->
-            black
-
-        ArcherSprite ->
-            black
-
-
 type Fightable
     = Fightable
 
@@ -405,45 +363,35 @@ spawnWall x y =
 
 
 type alias Model =
-    { windowWidth : Int
-    , windowHeight : Int
-    , gameModel : GameModel
+    { gameModel : GameModel
     }
 
 
-init : { width : Int, height : Int } -> ( Model, Cmd Msg )
-init { width, height } =
+init : { inputs : List String } -> ( Model, Cmd Msg )
+init flags =
     let
+        inputs =
+            flags.inputs
+                |> List.map
+                    (\input ->
+                        case input of
+                            "up" ->
+                                ArrowUpPressed
+
+                            "down" ->
+                                ArrowDownPressed
+
+                            "left" ->
+                                ArrowLeftPressed
+
+                            _ ->
+                                ArrowRightPressed
+                    )
+
         ( gameModel, gameCmd ) =
-            gameInit
+            gameInit (l3 0) inputs
     in
-    ( { windowWidth = width
-      , windowHeight = height
-      , gameModel = gameModel
-      }
-    , Cmd.map GameMsg gameCmd
-    )
-
-
-
----- VIEW
-
-
-view : Model -> Document Msg
-view model =
-    let
-        { title, body } =
-            gameView model.windowWidth model.windowHeight device model.gameModel
-
-        device =
-            Element.classifyDevice
-                { width = model.windowWidth
-                , height = model.windowHeight
-                }
-    in
-    { title = title
-    , body = List.map (Html.map GameMsg) body
-    }
+    ( { gameModel = gameModel }, Cmd.map GameMsg gameCmd )
 
 
 
@@ -451,8 +399,7 @@ view model =
 
 
 type Msg
-    = WindowResized Int Int
-    | GameMsg GameMsg
+    = GameMsg GameMsg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -467,11 +414,6 @@ update msg model =
             , Cmd.map GameMsg gameCmd
             )
 
-        WindowResized width height ->
-            ( { model | windowWidth = width, windowHeight = height }
-            , Cmd.none
-            )
-
 
 
 ---- SUBSCRIPTIONS
@@ -480,8 +422,7 @@ update msg model =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ Events.onResize WindowResized
-        , Sub.map GameMsg (gameSubscriptions model.gameModel)
+        [ Sub.map GameMsg (gameSubscriptions model.gameModel)
         ]
 
 
@@ -490,31 +431,22 @@ subscriptions model =
 
 
 type GameModel
-    = Welcome
-    | Playing PlayingData
-    | BetweenLevels BetweenLevelsData
-    | GameWon Int
-    | GameOver Int Level
+    = Playing
+        { level : Level
+        , inputs : List GameMsg
+        }
 
 
-type alias PlayingData =
-    { score : Int
-    , remainingLevels : List Level
-    }
-
-
-type alias BetweenLevelsData =
-    { score : Int
-    , finishedLevel : Level
-    , remainingLevels : List Level
-    }
-
-
-gameInit : ( GameModel, Cmd GameMsg )
-gameInit =
-    ( Welcome
-    , Dom.focus "start-button"
-        |> Task.attempt (\_ -> NoOp)
+gameInit : Level -> List GameMsg -> ( GameModel, Cmd GameMsg )
+gameInit level inputs =
+    let
+        queue input =
+            Task.perform identity (Task.succeed input)
+    in
+    ( Playing { level = level, inputs = List.drop 1 inputs }
+    , List.head inputs
+        |> Maybe.map queue
+        |> Maybe.withDefault (notifyFail ())
     )
 
 
@@ -766,746 +698,95 @@ isFinished width height score system =
 
 
 
----- VIEW
-
-
-gameView : Int -> Int -> Device -> GameModel -> Document GameMsg
-gameView windowWidth windowHeight device model =
-    { title = "grid"
-    , body =
-        [ Element.layoutWith
-            { options =
-                [ Element.focusStyle
-                    { borderColor = Nothing
-                    , backgroundColor = Nothing
-                    , shadow = Nothing
-                    }
-                ]
-            }
-            [ Element.width Element.fill
-            , Element.height Element.fill
-            , Font.family
-                [ Font.external
-                    { name = "Lato"
-                    , url = "https://fonts.googleapis.com/css?family=Lato"
-                    }
-                , Font.sansSerif
-                ]
-            , Font.size <|
-                case device.class of
-                    Phone ->
-                        28
-
-                    _ ->
-                        32
-            , Background.color yellow
-            ]
-            (case model of
-                Welcome ->
-                    viewWelcome
-
-                Playing data ->
-                    List.head data.remainingLevels
-                        |> Maybe.map (viewLevel windowWidth windowHeight device data.score)
-                        |> Maybe.withDefault Element.none
-
-                BetweenLevels data ->
-                    viewBetweenLevels windowWidth windowHeight device data
-
-                GameWon score ->
-                    viewGameWon score
-
-                GameOver score level ->
-                    viewGameOver windowWidth windowHeight device score level
-            )
-        ]
-    }
-
-
-
--- WELCOME
-
-
-viewWelcome : Element GameMsg
-viewWelcome =
-    Element.column
-        [ Element.width Element.fill
-        , Element.height Element.fill
-        , Element.spacing 25
-        ]
-        [ Element.el
-            [ Element.centerX
-            , Element.centerY
-            ]
-            (Element.text "Welcome!")
-        , button "start-button"
-            { onPress = StartPressed
-            , label = "Start"
-            }
-        ]
-
-
-
--- IN LEVEL
-
-
-viewLevel : Int -> Int -> Device -> Int -> Level -> Element GameMsg
-viewLevel windowWidth windowHeight device score { name, width, height, system, info } =
-    let
-        header =
-            Element.row
-                [ Element.width Element.fill ]
-                [ Element.el
-                    [ Element.alignLeft
-                    , Element.padding 5
-                    ]
-                    scoreText
-                , Element.el
-                    [ Element.alignRight
-                    , Element.padding 5
-                    , Font.italic
-                    ]
-                    title
-                ]
-
-        footer =
-            Element.el
-                [ Element.padding 5 ]
-                (Element.text info)
-
-        sidebar =
-            Element.column
-                [ Element.height Element.fill
-                , Element.width Element.fill
-                ]
-                [ Element.el
-                    [ Element.centerX
-                    , Element.padding 5
-                    , Font.italic
-                    ]
-                    title
-                , Element.el
-                    [ Element.centerX
-                    , Element.centerY
-                    ]
-                    verticalControls
-                , Element.el
-                    [ Element.centerX
-                    , Element.alignBottom
-                    , Element.padding 5
-                    ]
-                    scoreText
-                ]
-
-        verticalControls =
-            Element.column
-                [ Element.spacing 10
-                ]
-                [ iconButton ArrowUpPressed "caret-up"
-                , iconButton ArrowLeftPressed "caret-left"
-                , iconButton ArrowRightPressed "caret-right"
-                , iconButton ArrowDownPressed "caret-down"
-                ]
-
-        horizontalControls =
-            Element.row
-                [ Element.spacing 10
-                ]
-                [ iconButton ArrowLeftPressed "caret-left"
-                , iconButton ArrowUpPressed "caret-up"
-                , iconButton ArrowDownPressed "caret-down"
-                , iconButton ArrowRightPressed "caret-right"
-                ]
-
-        iconButton onPress label =
-            Input.button
-                [ Element.centerX
-                , Element.centerY
-                , Element.padding 10
-                , Element.width (Element.px 50)
-                , Element.height (Element.px 50)
-                , Background.color red
-                , Border.rounded 5
-                , Border.width 2
-                ]
-                { onPress = Just onPress
-                , label = icon label
-                }
-
-        title =
-            Element.text name
-
-        scoreText =
-            Element.text ("Score: " ++ String.fromInt score)
-    in
-    case device.class of
-        Phone ->
-            case device.orientation of
-                Portrait ->
-                    Element.column
-                        [ Element.width Element.fill
-                        , Element.height Element.fill
-                        ]
-                        [ header
-                        , Element.el
-                            [ Element.centerY
-                            , Element.width Element.fill
-                            ]
-                            (viewSystem windowWidth windowHeight device width height system)
-                        , Element.el
-                            [ Element.alignBottom
-                            , Element.centerX
-                            , Element.padding 20
-                            ]
-                            horizontalControls
-                        ]
-
-                Landscape ->
-                    Element.row
-                        [ Element.width Element.fill
-                        , Element.height Element.fill
-                        ]
-                        [ viewSystem windowWidth windowHeight device width height system
-                        , sidebar
-                        ]
-
-        _ ->
-            Element.column
-                [ Element.centerX
-                , Element.centerY
-                ]
-                [ header
-                , viewSystem windowWidth windowHeight device width height system
-                , footer
-                ]
-
-
-type alias TileInfo =
-    { backgroundColors : Dict ( Int, Int ) Element.Color
-    , foregroundColors : Dict ( Int, Int ) Element.Color
-    , icons : Dict ( Int, Int ) String
-    , infos : Dict ( Int, Int ) String
-    }
-
-
-computeTileInfo : Int -> Int -> System Store -> TileInfo
-computeTileInfo width height system =
-    let
-        with2 focusA focusB f =
-            Ecs.with2 focusA focusB system
-                |> List.map
-                    (\( _, ( a, b ) ) ->
-                        f a b
-                    )
-
-        apply f ( spriteId, ( sprite, spritePosition ) ) =
-            ( ( spritePosition.x, spritePosition.y ), f sprite )
-    in
-    { backgroundColors =
-        [ with2 withControl withPosition (rasterizeControl width height)
-            |> List.concat
-            |> List.map (\position -> ( ( position.x, position.y ), hex "e05038" ))
-        , getPositions withPlayer system
-            |> List.map (\position -> ( ( position.x, position.y ), hex "f2cbbc" ))
-        ]
-            |> List.concat
-            |> Dict.fromList
-    , foregroundColors =
-        Ecs.with2 withSprite withPosition system
-            |> List.map (apply spriteForegroundColor)
-            |> Dict.fromList
-    , icons =
-        Ecs.with2 withSprite withPosition system
-            |> List.map (apply spriteIcon)
-            |> Dict.fromList
-    , infos =
-        [ Ecs.with2 withSwitcher withPosition system
-            |> List.map (apply (.left >> String.fromInt))
-        , Ecs.with2 withTrapper withPosition system
-            |> List.map (apply (.left >> String.fromInt))
-        ]
-            |> List.concat
-            |> Dict.fromList
-    }
-
-
-viewSystem : Int -> Int -> Device -> Int -> Int -> System Store -> Element GameMsg
-viewSystem windowWidth windowHeight device width height system =
-    Element.column
-        [ Border.width 1
-        , Border.color black
-        , Element.width <|
-            case ( device.class, device.orientation ) of
-                ( Phone, Portrait ) ->
-                    Element.fill
-
-                _ ->
-                    Element.shrink
-        , Element.height <|
-            case ( device.class, device.orientation ) of
-                ( Phone, Landscape ) ->
-                    Element.fill
-
-                _ ->
-                    Element.shrink
-        ]
-        (List.range 0 (height - 1)
-            |> List.map
-                (viewRow
-                    windowWidth
-                    windowHeight
-                    device
-                    width
-                    height
-                    (computeTileInfo width height system)
-                    system
-                )
-        )
-
-
-viewRow : Int -> Int -> Device -> Int -> Int -> TileInfo -> System Store -> Int -> Element GameMsg
-viewRow windowWidth windowHeight device width height tileInfo system rowIndex =
-    let
-        tileWidth =
-            case device.class of
-                Phone ->
-                    case device.orientation of
-                        Portrait ->
-                            windowWidth // width - 1
-
-                        Landscape ->
-                            windowHeight // height - 1
-
-                _ ->
-                    80
-    in
-    Element.row
-        (case device.class of
-            Phone ->
-                case device.orientation of
-                    Portrait ->
-                        [ Element.width Element.fill ]
-
-                    Landscape ->
-                        [ Element.height Element.fill ]
-
-            _ ->
-                []
-        )
-        (List.range 0 (width - 1)
-            |> List.map (viewTile tileWidth device tileInfo system rowIndex)
-        )
-
-
-viewTile : Int -> Device -> TileInfo -> System Store -> Int -> Int -> Element GameMsg
-viewTile tileWidth device tileInfo system rowIndex columnIndex =
-    let
-        backgroundColor =
-            Dict.get position tileInfo.backgroundColors
-                |> Maybe.withDefault white
-
-        foregroundColor =
-            Dict.get position tileInfo.foregroundColors
-                |> Maybe.withDefault black
-
-        iconName =
-            Dict.get position tileInfo.icons
-                |> Maybe.withDefault ""
-
-        info =
-            Dict.get position tileInfo.infos
-
-        position =
-            ( columnIndex, rowIndex )
-
-        ( actualTileWidth, actualTileHeight ) =
-            case device.class of
-                Phone ->
-                    case device.orientation of
-                        Portrait ->
-                            ( Element.fill
-                                |> Element.minimum tileWidth
-                            , Element.px tileWidth
-                            )
-
-                        Landscape ->
-                            ( Element.px tileWidth
-                            , Element.fill
-                                |> Element.minimum tileWidth
-                            )
-
-                _ ->
-                    ( Element.px tileWidth
-                    , Element.px tileWidth
-                    )
-    in
-    Element.el
-        [ Element.width actualTileWidth
-        , Element.height actualTileHeight
-        , Border.width 1
-        , Border.color black
-        , Font.color foregroundColor
-        , Background.color backgroundColor
-        , Element.above <|
-            case info of
-                Nothing ->
-                    Element.none
-
-                Just infoText ->
-                    Element.el
-                        [ Element.width Element.fill
-                        , Font.size 24
-                        , Element.moveDown 28
-                        , Element.moveLeft 5
-                        ]
-                        (Element.el
-                            [ Element.alignRight ]
-                            (Element.text infoText)
-                        )
-        ]
-        (icon iconName)
-
-
-
--- BETWEEN LEVELS
-
-
-viewBetweenLevels : Int -> Int -> Device -> BetweenLevelsData -> Element GameMsg
-viewBetweenLevels windowWidth windowHeight device data =
-    case device.class of
-        Phone ->
-            Element.column
-                [ Element.centerY
-                , Element.centerX
-                , Element.spacing 25
-                ]
-                [ Element.el
-                    [ Element.centerX ]
-                    (Element.text "Very good!")
-                , Element.el
-                    [ Element.centerX ]
-                    (Element.text ("Score: " ++ String.fromInt data.score))
-                , button "next-level-button"
-                    { onPress = NextLevelPressed
-                    , label = "Next level"
-                    }
-                ]
-
-        _ ->
-            Element.el
-                [ Element.centerX
-                , Element.centerY
-                , modal
-                    [ Element.el
-                        [ Element.centerX ]
-                        (Element.text "Very good!")
-                    , Element.el
-                        [ Element.centerX ]
-                        (Element.text ("Score: " ++ String.fromInt data.score))
-                    , button "next-level-button"
-                        { onPress = NextLevelPressed
-                        , label = "Next level"
-                        }
-                    ]
-                ]
-                (viewSystem
-                    windowWidth
-                    windowHeight
-                    device
-                    data.finishedLevel.width
-                    data.finishedLevel.height
-                    data.finishedLevel.system
-                )
-
-
-
--- GAME WON
-
-
-viewGameWon : Int -> Element GameMsg
-viewGameWon score =
-    Element.column
-        [ Element.centerX
-        , Element.centerY
-        , Element.spacing 25
-        , Background.color yellow
-        ]
-        [ Element.el
-            [ Element.centerX ]
-            (Element.text "You have won!")
-        , Element.el
-            [ Element.centerX ]
-            (Element.text ("Score: " ++ String.fromInt score))
-        , button "start-button"
-            { onPress = StartAgainPressed
-            , label = "Start again"
-            }
-        ]
-
-
-
--- GAME OVER
-
-
-viewGameOver : Int -> Int -> Device -> Int -> Level -> Element GameMsg
-viewGameOver windowWidth windowHeight device score level =
-    case device.class of
-        Phone ->
-            Element.column
-                [ Element.centerY
-                , Element.centerX
-                , Element.spacing 25
-                ]
-                [ Element.el
-                    [ Element.centerX ]
-                    (Element.text "Game over")
-                , Element.el
-                    [ Element.centerX ]
-                    (Element.text ("Score: " ++ String.fromInt score))
-                , button "start-button"
-                    { onPress = StartAgainPressed
-                    , label = "Start again"
-                    }
-                ]
-
-        _ ->
-            Element.el
-                [ Element.centerX
-                , Element.centerY
-                , modal
-                    [ Element.el
-                        [ Element.centerX ]
-                        (Element.text "Game over")
-                    , Element.el
-                        [ Element.centerX ]
-                        (Element.text ("Score: " ++ String.fromInt score))
-                    , button "start-button"
-                        { onPress = StartAgainPressed
-                        , label = "Start again"
-                        }
-                    ]
-                ]
-                (viewSystem windowWidth windowHeight device level.width level.height level.system)
-
-
-
--- HELPER
-
-
-modal : List (Element msg) -> Element.Attribute msg
-modal elements =
-    Element.inFront <|
-        Element.column
-            [ Element.centerX
-            , Element.centerY
-            , Element.spacing 25
-            , Element.padding 15
-            , Border.width 2
-            , Border.color black
-            , Background.color yellow
-            ]
-            elements
-
-
-button : String -> { onPress : msg, label : String } -> Element msg
-button id { onPress, label } =
-    Input.button
-        [ Element.centerX
-        , Element.centerY
-        , Element.padding 10
-        , Border.width 2
-        , Border.color black
-        , Background.color red
-        , Element.htmlAttribute (Attributes.id id)
-        ]
-        { onPress = Just onPress
-        , label = Element.text label
-        }
-
-
-icon : String -> Element msg
-icon name =
-    Element.html <|
-        Html.i
-            [ Attributes.class "fas"
-            , Attributes.class ("fa-" ++ name)
-            , Attributes.style "text-align" "center"
-            , Attributes.style "margin" "auto"
-            ]
-            []
-
-
-hex : String -> Element.Color
-hex string =
-    let
-        toInterval start end =
-            String.slice start end string
-                |> Hex.fromString
-                |> Result.toMaybe
-                |> Maybe.map (\int -> toFloat int / 255)
-                |> Maybe.withDefault 0
-    in
-    Element.rgb
-        (toInterval 0 2)
-        (toInterval 2 4)
-        (toInterval 4 6)
-
-
-red : Element.Color
-red =
-    hex "e05038"
-
-
-yellow : Element.Color
-yellow =
-    hex "e6af4b"
-
-
-black : Element.Color
-black =
-    Element.rgb 0 0 0
-
-
-white : Element.Color
-white =
-    Element.rgb 1 1 1
-
-
-
 ---- UPDATE
 
 
 type GameMsg
-    = NoOp
-    | StartPressed
-    | NextLevelPressed
-      -- IN LEVEL
-    | ArrowUpPressed
+    = ArrowUpPressed
     | ArrowDownPressed
     | ArrowLeftPressed
     | ArrowRightPressed
-      -- GAME WON/OVER
-    | StartAgainPressed
+
+
+port notifyWon : () -> Cmd msg
+
+
+port notifyLost : () -> Cmd msg
+
+
+port notifyFail : () -> Cmd msg
+
+
+randomInput : Generator GameMsg
+randomInput =
+    Random.uniform ArrowUpPressed
+        [ ArrowDownPressed
+        , ArrowLeftPressed
+        , ArrowRightPressed
+        ]
 
 
 gameUpdate : GameMsg -> GameModel -> ( GameModel, Cmd GameMsg )
 gameUpdate msg model =
     case model of
-        Welcome ->
-            case msg of
-                StartPressed ->
-                    ( Playing
-                        { score = 0
-                        , remainingLevels = allLevels
-                        }
-                    , Cmd.none
-                    )
-
-                _ ->
-                    ( model, Cmd.none )
-
-        Playing { score, remainingLevels } ->
-            case remainingLevels of
-                [] ->
-                    ( model, Cmd.none )
-
-                level :: rest ->
+        Playing { level, inputs } ->
+            let
+                handleArrowPressed deltaX deltaY =
                     let
-                        handleArrowPressed deltaX deltaY =
+                        queue input =
+                            Task.perform identity (Task.succeed input)
+                    in
+                    case
+                        step level.width
+                            level.height
+                            deltaX
+                            deltaY
+                            level.system
+                    of
+                        Just newSystem ->
                             let
-                                newSystem =
-                                    step level.width level.height deltaX deltaY level.system
-
                                 newLevel =
                                     { level | system = newSystem }
                             in
-                            case level.isFinished newSystem of
+                            ( Playing
+                                { level = newLevel
+                                , inputs = List.drop 1 inputs
+                                }
+                            , case level.isFinished newSystem of
                                 Running ->
-                                    ( Playing
-                                        { score = score
-                                        , remainingLevels = newLevel :: rest
-                                        }
-                                    , Cmd.none
-                                    )
+                                    List.head inputs
+                                        |> Maybe.map queue
+                                        |> Maybe.withDefault (notifyFail ())
 
                                 Lost levelScore ->
-                                    ( GameOver (score + levelScore) newLevel
-                                    , Dom.focus "start-button"
-                                        |> Task.attempt (\_ -> NoOp)
-                                    )
+                                    notifyLost ()
 
                                 Won levelScore ->
-                                    case rest of
-                                        [] ->
-                                            ( GameWon (score + levelScore)
-                                            , Dom.focus "start-button"
-                                                |> Task.attempt (\_ -> NoOp)
-                                            )
+                                    notifyWon ()
+                            )
 
-                                        _ ->
-                                            ( BetweenLevels
-                                                { score = score + levelScore
-                                                , finishedLevel = newLevel
-                                                , remainingLevels = rest
-                                                }
-                                            , Dom.focus "next-level-button"
-                                                |> Task.attempt (\_ -> NoOp)
-                                            )
-                    in
-                    case msg of
-                        ArrowUpPressed ->
-                            handleArrowPressed 0 -1
-
-                        ArrowDownPressed ->
-                            handleArrowPressed 0 1
-
-                        ArrowLeftPressed ->
-                            handleArrowPressed -1 0
-
-                        ArrowRightPressed ->
-                            handleArrowPressed 1 0
-
-                        _ ->
-                            ( model, Cmd.none )
-
-        BetweenLevels data ->
+                        Nothing ->
+                            ( Playing
+                                { level = level
+                                , inputs = List.drop 1 inputs
+                                }
+                            , List.head inputs
+                                |> Maybe.map queue
+                                |> Maybe.withDefault (notifyFail ())
+                            )
+            in
             case msg of
-                NextLevelPressed ->
-                    ( Playing
-                        { score = data.score
-                        , remainingLevels = data.remainingLevels
-                        }
-                    , Cmd.none
-                    )
+                ArrowUpPressed ->
+                    handleArrowPressed 0 -1
 
-                _ ->
-                    ( model, Cmd.none )
+                ArrowDownPressed ->
+                    handleArrowPressed 0 1
 
-        GameWon score ->
-            case msg of
-                StartAgainPressed ->
-                    ( Playing
-                        { score = 0
-                        , remainingLevels = allLevels
-                        }
-                    , Cmd.none
-                    )
+                ArrowLeftPressed ->
+                    handleArrowPressed -1 0
 
-                _ ->
-                    ( model, Cmd.none )
-
-        GameOver score _ ->
-            case msg of
-                StartAgainPressed ->
-                    ( Playing
-                        { score = 0
-                        , remainingLevels = allLevels
-                        }
-                    , Cmd.none
-                    )
-
-                _ ->
-                    ( model, Cmd.none )
+                ArrowRightPressed ->
+                    handleArrowPressed 1 0
 
 
 
@@ -1514,27 +795,7 @@ gameUpdate msg model =
 
 gameSubscriptions : GameModel -> Sub GameMsg
 gameSubscriptions model =
-    Events.onKeyDown
-        (Decode.field "key" Decode.string
-            |> Decode.andThen
-                (\key ->
-                    case key of
-                        "ArrowUp" ->
-                            Decode.succeed ArrowUpPressed
-
-                        "ArrowDown" ->
-                            Decode.succeed ArrowDownPressed
-
-                        "ArrowLeft" ->
-                            Decode.succeed ArrowLeftPressed
-
-                        "ArrowRight" ->
-                            Decode.succeed ArrowRightPressed
-
-                        _ ->
-                            Decode.fail "not handling that key"
-                )
-        )
+    Sub.none
 
 
 
@@ -1546,16 +807,8 @@ debugStep =
     False
 
 
-step : Int -> Int -> Int -> Int -> System Store -> System Store
+step : Int -> Int -> Int -> Int -> System Store -> Maybe (System Store)
 step width height deltaX deltaY system =
-    let
-        optionallyDebugStep newSystem =
-            if debugStep then
-                --Debug.log "newSystem" newSystem
-                newSystem
-            else
-                newSystem
-    in
     system
         |> movePlayer width height deltaX deltaY
         |> Maybe.map
@@ -1566,8 +819,6 @@ step width height deltaX deltaY system =
                 >> stepSpawners
                 >> stepArchers width height
             )
-        |> Maybe.withDefault system
-        |> optionallyDebugStep
 
 
 
